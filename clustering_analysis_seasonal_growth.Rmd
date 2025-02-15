@@ -59,10 +59,8 @@ aic_bic <- data.frame(clu = c(),
 # Estimation of growth trajectries using the finite mixture model
 ## no. of cluster = 2 
 ```{r}
-
 # number of k
 kk <- 2
-
 
 # output name
 csv_name <- paste("./output/k", kk, "_data.csv", sep = "")
@@ -102,14 +100,6 @@ llsbgm2 <- function(para,data){
   lobs <- data[,2]
   ll <- -log(dnorm(log(lobs),log(sbgm(lmax,lmin,a1,theta,t=t)),sd=sd(log(lobs))))
   ll
-}
-
-sbgmplot <- function(par,t,ylim,col="black",main="",xlab="",ylab="",type="l"){
-  lmax <- exp(par[1])
-  lmin <- exp(par[2])
-  a1 <- exp(par[3])
-  theta <- par[4]
-  plot(t,sbgm(lmax,lmin,a1,theta,t=t),ylim=ylim,col=col,main=main,xlab=xlab,ylab=ylab,type=type, font.lab=1, cex.lab=1.5, cex.axis=1, lwd=4)
 }
 
 ipara <- c(log(max(data$fl)),log(min(data$fl)),log(1.7E-4),0)
@@ -204,9 +194,6 @@ add_data <- data.frame(clu = kk,
                        bic = bic)
 aic_bic <- rbind(aic_bic, add_data)
 
-# color list
-cb = brewer.pal(kk, "RdYlBu")
-
 # sorting
 par(mfrow=c(1,max(k)))
 
@@ -251,7 +238,6 @@ estpara2 <- estpara2[,-5]
 # convert matrix
 estpara2 <- matrix(as.matrix(estpara2), nrow(estpara2), ncol(estpara2))
 
-
 ### plot growth history
 kkk <- max(k)
 if (max(k) == kk) {
@@ -259,25 +245,47 @@ if (max(k) == kk) {
 } else {
   num_lis <- seq(1,kkk,1)
 }
-# plot
-for(i in num_lis) {
-  sbgmplot(estpara2[i,],t,c(0,max(data$fl)),col=cb[i])
-  points(fl~days_from_hatching, data=data[data$ocluster_rename==i,],
-         bg=cb[i], pch=21, cex=0.8, lwd=0.5)
-}
 
+# plot
+# color list
+cb = brewer.pal(4, "RdYlBu")
+cb = c("#D7191C","#2C7BB6")
+
+g <- ggplot(NULL)
+for(i in num_lis) {
+  # data
+  growth_curve <- tibble(
+    t = t,
+    fl = sbgm(exp(estpara2[i,1]), 
+              exp(estpara2[i,2]), 
+              exp(estpara2[i,3]), 
+              estpara2[i,4], 
+              t=t))
+  # plot
+  g <- g +
+    geom_point(data = data[data$ocluster_rename==i,],
+               aes(x = days_from_hatching, y = fl), 
+               size = 2, alpha = 0.5, fill = cb[i],
+               shape = 21, colour = "black") +
+    geom_line(data = growth_curve, aes(x = t, y = fl),
+              linewidth = 2, alpha=1, col = cb[i]) +
+    labs(title = paste0(as.character(i), " clusters"), 
+         x = "No. of days since January-1", 
+         y = "Fork length (mm)")
+}
+g
 
 # out to csv
 data2 <- aggregate(ocluster_rename~id,data,unique)
 write.csv(data2,csv_name, row.names = FALSE)
+
+count(data2, ocluster_rename)
 ```
 
 ## no. of cluster = 3
 ```{r}
-
 # number of k
 kk <- 3
-
 
 # output name
 csv_name <- paste("./output/k", kk, "_data.csv", sep = "")
@@ -317,14 +325,6 @@ llsbgm2 <- function(para,data){
   lobs <- data[,2]
   ll <- -log(dnorm(log(lobs),log(sbgm(lmax,lmin,a1,theta,t=t)),sd=sd(log(lobs))))
   ll
-}
-
-sbgmplot <- function(par,t,ylim,col="black",main="",xlab="",ylab="",type="l"){
-  lmax <- exp(par[1])
-  lmin <- exp(par[2])
-  a1 <- exp(par[3])
-  theta <- par[4]
-  plot(t,sbgm(lmax,lmin,a1,theta,t=t),ylim=ylim,col=col,main=main,xlab=xlab,ylab=ylab,type=type, font.lab=1, cex.lab=1.5, cex.axis=1, lwd=4)
 }
 
 ipara <- c(log(max(data$fl)),log(min(data$fl)),log(1.7E-4),0)
@@ -419,9 +419,6 @@ add_data <- data.frame(clu = kk,
                        bic = bic)
 aic_bic <- rbind(aic_bic, add_data)
 
-# color list
-cb = brewer.pal(kk, "RdYlBu")
-
 # sorting
 par(mfrow=c(1,max(k)))
 
@@ -466,7 +463,6 @@ estpara2 <- estpara2[,-5]
 # convert matrix
 estpara2 <- matrix(as.matrix(estpara2), nrow(estpara2), ncol(estpara2))
 
-
 ### plot growth history
 kkk <- max(k)
 if (max(k) == kk) {
@@ -474,25 +470,47 @@ if (max(k) == kk) {
 } else {
   num_lis <- seq(1,kkk,1)
 }
-# plot
-for(i in num_lis) {
-  sbgmplot(estpara2[i,],t,c(0,max(data$fl)),col=cb[i])
-  points(fl~days_from_hatching, data=data[data$ocluster_rename==i,],
-         bg=cb[i], pch=21, cex=0.8, lwd=0.5)
-}
 
+# plot
+# color list
+cb = brewer.pal(4, "RdYlBu")
+cb = c("#D7191C","#FDAE61","#2C7BB6")
+
+g <- ggplot(NULL)
+for(i in num_lis) {
+  # data
+  growth_curve <- tibble(
+    t = t,
+    fl = sbgm(exp(estpara2[i,1]), 
+              exp(estpara2[i,2]), 
+              exp(estpara2[i,3]), 
+              estpara2[i,4], 
+              t=t))
+  # plot
+  g <- g +
+    geom_point(data = data[data$ocluster_rename==i,],
+               aes(x = days_from_hatching, y = fl), 
+               size = 2, alpha = 0.5, fill = cb[i],
+               shape = 21, colour = "black") +
+    geom_line(data = growth_curve, aes(x = t, y = fl),
+              linewidth = 2, alpha=1, col = cb[i]) +
+    labs(title = paste0(as.character(i), " clusters"), 
+         x = "No. of days since January-1", 
+         y = "Fork length (mm)")
+}
+g
 
 # out to csv
 data2 <- aggregate(ocluster_rename~id,data,unique)
 write.csv(data2,csv_name, row.names = FALSE)
+
+count(data2, ocluster_rename)
 ```
 
 ## no. of cluster = 4
 ```{r}
-
 # number of k
 kk <- 4
-
 
 # output name
 csv_name <- paste("./output/k", kk, "_data.csv", sep = "")
@@ -532,14 +550,6 @@ llsbgm2 <- function(para,data){
   lobs <- data[,2]
   ll <- -log(dnorm(log(lobs),log(sbgm(lmax,lmin,a1,theta,t=t)),sd=sd(log(lobs))))
   ll
-}
-
-sbgmplot <- function(par,t,ylim,col="black",main="",xlab="",ylab="",type="l"){
-  lmax <- exp(par[1])
-  lmin <- exp(par[2])
-  a1 <- exp(par[3])
-  theta <- par[4]
-  plot(t,sbgm(lmax,lmin,a1,theta,t=t),ylim=ylim,col=col,main=main,xlab=xlab,ylab=ylab,type=type, font.lab=1, cex.lab=1.5, cex.axis=1, lwd=4)
 }
 
 ipara <- c(log(max(data$fl)),log(min(data$fl)),log(1.7E-4),0)
@@ -634,9 +644,6 @@ add_data <- data.frame(clu = kk,
                        bic = bic)
 aic_bic <- rbind(aic_bic, add_data)
 
-# color list
-cb = brewer.pal(kk, "RdYlBu")
-
 # sorting
 par(mfrow=c(1,max(k)))
 
@@ -681,7 +688,6 @@ estpara2 <- estpara2[,-5]
 # convert matrix
 estpara2 <- matrix(as.matrix(estpara2), nrow(estpara2), ncol(estpara2))
 
-
 ### plot growth history
 kkk <- max(k)
 if (max(k) == kk) {
@@ -689,25 +695,47 @@ if (max(k) == kk) {
 } else {
   num_lis <- seq(1,kkk,1)
 }
-# plot
-for(i in num_lis) {
-  sbgmplot(estpara2[i,],t,c(0,max(data$fl)),col=cb[i])
-  points(fl~days_from_hatching, data=data[data$ocluster_rename==i,],
-         bg=cb[i], pch=21, cex=0.8, lwd=0.5)
-}
 
+# plot
+# color list
+cb = brewer.pal(4, "RdYlBu")
+cb = c("#D7191C","#FDAE61","#ABD9E9","#2C7BB6")
+
+g <- ggplot(NULL)
+for(i in num_lis) {
+  # data
+  growth_curve <- tibble(
+    t = t,
+    fl = sbgm(exp(estpara2[i,1]), 
+              exp(estpara2[i,2]), 
+              exp(estpara2[i,3]), 
+              estpara2[i,4], 
+              t=t))
+  # plot
+  g <- g +
+    geom_point(data = data[data$ocluster_rename==i,],
+               aes(x = days_from_hatching, y = fl), 
+               size = 2, alpha = 0.5, fill = cb[i],
+               shape = 21, colour = "black") +
+    geom_line(data = growth_curve, aes(x = t, y = fl),
+              linewidth = 2, alpha=1, col = cb[i]) +
+    labs(title = paste0(as.character(i), " clusters"), 
+         x = "No. of days since January-1", 
+         y = "Fork length (mm)")
+}
+g
 
 # out to csv
 data2 <- aggregate(ocluster_rename~id,data,unique)
 write.csv(data2,csv_name, row.names = FALSE)
+
+count(data2, ocluster_rename)
 ```
 
 ## no. of cluster = 5
 ```{r}
-
 # number of k
 kk <- 5
-
 
 # output name
 csv_name <- paste("./output/k", kk, "_data.csv", sep = "")
@@ -747,14 +775,6 @@ llsbgm2 <- function(para,data){
   lobs <- data[,2]
   ll <- -log(dnorm(log(lobs),log(sbgm(lmax,lmin,a1,theta,t=t)),sd=sd(log(lobs))))
   ll
-}
-
-sbgmplot <- function(par,t,ylim,col="black",main="",xlab="",ylab="",type="l"){
-  lmax <- exp(par[1])
-  lmin <- exp(par[2])
-  a1 <- exp(par[3])
-  theta <- par[4]
-  plot(t,sbgm(lmax,lmin,a1,theta,t=t),ylim=ylim,col=col,main=main,xlab=xlab,ylab=ylab,type=type, font.lab=1, cex.lab=1.5, cex.axis=1, lwd=4)
 }
 
 ipara <- c(log(max(data$fl)),log(min(data$fl)),log(1.7E-4),0)
@@ -849,9 +869,6 @@ add_data <- data.frame(clu = kk,
                        bic = bic)
 aic_bic <- rbind(aic_bic, add_data)
 
-# color list
-cb = brewer.pal(kk, "RdYlBu")
-
 # sorting
 par(mfrow=c(1,max(k)))
 
@@ -896,7 +913,6 @@ estpara2 <- estpara2[,-5]
 # convert matrix
 estpara2 <- matrix(as.matrix(estpara2), nrow(estpara2), ncol(estpara2))
 
-
 ### plot growth history
 kkk <- max(k)
 if (max(k) == kk) {
@@ -904,25 +920,46 @@ if (max(k) == kk) {
 } else {
   num_lis <- seq(1,kkk,1)
 }
-# plot
-for(i in num_lis) {
-  sbgmplot(estpara2[i,],t,c(0,max(data$fl)),col=cb[i])
-  points(fl~days_from_hatching, data=data[data$ocluster_rename==i,],
-         bg=cb[i], pch=21, cex=0.8, lwd=0.5)
-}
 
+# plot
+# color list
+cb = brewer.pal(kk, "RdYlBu")
+
+g <- ggplot(NULL)
+for(i in num_lis) {
+  # data
+  growth_curve <- tibble(
+    t = t,
+    fl = sbgm(exp(estpara2[i,1]), 
+              exp(estpara2[i,2]), 
+              exp(estpara2[i,3]), 
+              estpara2[i,4], 
+              t=t))
+  # plot
+  g <- g +
+    geom_point(data = data[data$ocluster_rename==i,],
+               aes(x = days_from_hatching, y = fl), 
+               size = 2, alpha = 0.5, fill = cb[i],
+               shape = 21, colour = "black") +
+    geom_line(data = growth_curve, aes(x = t, y = fl),
+              linewidth = 2, alpha=1, col = cb[i]) +
+    labs(title = paste0(as.character(i), " clusters"), 
+         x = "No. of days since January-1", 
+         y = "Fork length (mm)")
+}
+g
 
 # out to csv
 data2 <- aggregate(ocluster_rename~id,data,unique)
 write.csv(data2,csv_name, row.names = FALSE)
+
+count(data2, ocluster_rename)
 ```
 
 ## no. of cluster = 6
 ```{r}
-
 # number of k
 kk <- 6
-
 
 # output name
 csv_name <- paste("./output/k", kk, "_data.csv", sep = "")
@@ -962,14 +999,6 @@ llsbgm2 <- function(para,data){
   lobs <- data[,2]
   ll <- -log(dnorm(log(lobs),log(sbgm(lmax,lmin,a1,theta,t=t)),sd=sd(log(lobs))))
   ll
-}
-
-sbgmplot <- function(par,t,ylim,col="black",main="",xlab="",ylab="",type="l"){
-  lmax <- exp(par[1])
-  lmin <- exp(par[2])
-  a1 <- exp(par[3])
-  theta <- par[4]
-  plot(t,sbgm(lmax,lmin,a1,theta,t=t),ylim=ylim,col=col,main=main,xlab=xlab,ylab=ylab,type=type, font.lab=1, cex.lab=1.5, cex.axis=1, lwd=4)
 }
 
 ipara <- c(log(max(data$fl)),log(min(data$fl)),log(1.7E-4),0)
@@ -1064,9 +1093,6 @@ add_data <- data.frame(clu = kk,
                        bic = bic)
 aic_bic <- rbind(aic_bic, add_data)
 
-# color list
-cb = brewer.pal(kk, "RdYlBu")
-
 # sorting
 par(mfrow=c(1,max(k)))
 
@@ -1111,7 +1137,6 @@ estpara2 <- estpara2[,-5]
 # convert matrix
 estpara2 <- matrix(as.matrix(estpara2), nrow(estpara2), ncol(estpara2))
 
-
 ### plot growth history
 kkk <- max(k)
 if (max(k) == kk) {
@@ -1119,20 +1144,43 @@ if (max(k) == kk) {
 } else {
   num_lis <- seq(1,kkk,1)
 }
-# plot
-for(i in num_lis) {
-  sbgmplot(estpara2[i,],t,c(0,max(data$fl)),col=cb[i])
-  points(fl~days_from_hatching, data=data[data$ocluster_rename==i,],
-         bg=cb[i], pch=21, cex=0.8, lwd=0.5)
-}
 
+# plot
+# color list
+cb = brewer.pal(kk, "RdYlBu")
+
+g <- ggplot(NULL)
+for(i in num_lis) {
+  # data
+  growth_curve <- tibble(
+    t = t,
+    fl = sbgm(exp(estpara2[i,1]), 
+              exp(estpara2[i,2]), 
+              exp(estpara2[i,3]), 
+              estpara2[i,4], 
+              t=t))
+  # plot
+  g <- g +
+    geom_point(data = data[data$ocluster_rename==i,],
+               aes(x = days_from_hatching, y = fl), 
+               size = 2, alpha = 0.5, fill = cb[i],
+               shape = 21, colour = "black") +
+    geom_line(data = growth_curve, aes(x = t, y = fl),
+              linewidth = 2, alpha=1, col = cb[i]) +
+    labs(title = paste0(as.character(i), " clusters"), 
+         x = "No. of days since January-1", 
+         y = "Fork length (mm)")
+}
+g
 
 # out to csv
 data2 <- aggregate(ocluster_rename~id,data,unique)
 write.csv(data2,csv_name, row.names = FALSE)
+
+count(data2, ocluster_rename)
 ```
 
-# Check AIC and BIC 
+# Check BIC 
 ```{r}
 
 aic_bic
@@ -1148,10 +1196,35 @@ ggplot(aic_bic,aes(x=clu,y=bic)) +
 
 ```
 
-# Plot growth trajectries of best cluster
+# Plot individual's growth trajectries
+
+Best cluster: 3
 
 ```{r}
+# read data
+d0 <- read.csv("./input_data/rawdata_filtered.csv")
+d_gc <- read.csv("./output/k3_data.csv")
 
+# filtering
+d1 <- d0 %>% 
+  left_join(d_gc, by="id") %>%
+  filter(ocluster_rename %in% c(1,2,3)) %>% 
+  mutate(growth = as.character(ocluster_rename))
+
+# plot
+color_list = brewer.pal(4, "RdYlBu") # color list
+color_list = c("#D7191C","#FDAE61","#2C7BB6")
+
+g <- ggplot(NULL) +
+  geom_line(data = d1, aes(x = days_from_hatching, y = fl, 
+                           group = id, color = growth),
+              linewidth = 0.5, alpha=0.8) +
+    labs(x = "No. of days since January-1", 
+         y = "Fork length (mm)") +
+  scale_color_manual('glowth cluster: ', values = color_list) +
+  theme(legend.position = 'top')
+g
 
 ```
+
 
