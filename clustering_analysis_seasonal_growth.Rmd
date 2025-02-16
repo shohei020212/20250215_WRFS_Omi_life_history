@@ -1,5 +1,5 @@
 ---
-title: "clustering_analysis_seasonal_growth"
+title: "clustering analysis - seasonal growth pattern in 2016-cohort"
 author: "Shohei Noda"
 date: "2025-02-15"
 output: 

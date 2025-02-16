@@ -1,0 +1,593 @@
+---
+title: "Parameters for matrix population model with three-GC"
+author: "Shohei Noda"
+date: "2025-02-16"
+output: 
+  html_document:
+    css: styles.css
+    toc: yes
+    toc_depth: 5
+    toc_float: TRUE
+    number_section: true
+    mathjax: "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+---
+
+## モデル
+**3つの成長クラスターを含むステージ構造モデル**
+
+<!-- ![a schematic diagram of the age-stage structured model](rawdata/matrix_population_model_growth_cluster.png){width=70%} -->
+
+## データ
+**インプットファイルの説明**  
+
+* "rawdata/WRFS_Sato_2010_fishdata.csv"：メス体サイズとと卵数のデータ  
+* "rawdata/WRFS_Data_241127.xlsx"：捕獲調査の生データ
+* "output/rawdata_filtered.csv"：捕獲調査の生データに生活史情報を結合したデータ
+* "output/k3_data.csv"：個体を成長パターンでクラスタリングしたデータ（成長クラスター）
+* "output/phi_age0_2016cohort.csv"：2016年コホートにおける０歳10月までの生残率をCJSモデルで推定した結果
+* "output/phi_age0_1_oct_2016cohort.csv"：０歳10月から1歳10月までの生残率をCJSモデルで推定した結果
+* "output/phi_age1_2_oct_2016cohort.csv"：1歳10月から2歳10月までの生残率をCJSモデルで推定した結果
+* "output/phi_age2_3_age2mature.csv"：2歳10月から3歳10月までの生残率をCJSモデルで推定した結果
+* "output/predict_prob_age1maturity.csv"：GLMによる1際成熟確率の推定結果
+* "output/predict_prob_age2maturity.csv"：GLMによる2際成熟確率の推定結果
+
+<style>
+body {
+  font-family: 'Times New Roman', serif;
+  font-size: 14px;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+# load package
+library("dplyr")
+library("tidyverse")
+library(lme4)
+library(ggeffects)
+require(openxlsx)
+library(ggplot2)
+
+# plot setting
+theme_set(
+  theme_bw() +
+    theme(title = element_text(size=20, family="sans", face="bold"),
+          axis.title = element_text(size=20, family="sans", face="bold"),
+          axis.text = element_text(size=15, family="sans"),
+          legend.title = element_text(size = 15, family="sans", face="bold"),
+          legend.text = element_text(size = 15, family="sans"),
+          legend.position = 'right')
+  )
+
+```
+
+## パラメータの一覧
+
+| Parameters  | Definition  | Formula     | Data        |
+|:------------|:------------|:------------|:------------|
+| $E(x)$ | メスの体サイズ(mm)から期待される産卵数 | $\exp(-9.0 + 2.76 * \log(x))$ | Sato et al. unpublished data |
+| $H$ | 稚魚が0歳5月まで生残する確率 | $N_{juvenile}/\sum_{i=1}^{N_{female}}E_i(x)$ | mature females at 2015 and 2016 cohort |
+| $s1,s2,s3$ | 各成長クラスターの0歳5月から10月まで生残する確率 | $CJS\;model$ | 2016 cohorts |
+| $p1,p2,p3$ | コホートにおける各成長クラスター(GC)の割合<br>p1: GC1<br>p2: GC2<br>p3: GC3<br>(1-p1-p2-p3): GC4 | $N_{GC}/N_{total}$ | 2016 cohort |
+| $h1,h2,h3$ | 卵から各成長クラスターの稚魚が出現する確率 | $H*s_{GC}*p_{GC}$ | 2016 cohort |
+| $u01,u02,u03$ | 各成長クラスターが0歳10月から1歳10月まで生残する確率 | $CJS\;model$ | 2016 cohort |
+| $u11,u12,u13$ | 各成長クラスターの未成熟個体が1歳10月から2歳8月まで生残する確率 | $CJS\;model$ | 2016 cohort |
+| $u2$ | 未成熟個体が2歳10月から3歳10月まで生残する確率 | $CJS\;model$ | 2019-2021 cohorts |
+| $m01,m02,m03$ | 各成長クラスターの1歳での成熟確率 | $GLM_{binominal}$ <br> $prob. of maturation \sim GC * treatment$ | 2016 cohort |
+| $m1$ | 2歳での成熟確率 | $GLM_{binominal}$ <br> $prob. of maturation \sim treatment$ | 2015 cohort |
+| $m2$ | 3歳での成熟確率(=1.0) | non | non |
+| $v11,v12,v13$ | 各成長クラスターの成熟個体が1歳10月から2歳8月まで生残する確率 | $CJS\;model$ | 2016 cohort |
+| $v2$ | 成熟個体が2歳10月から3歳10月まで生残する確率 | $CJS\;model$ | 2019-2021 cohorts |
+| $ui01,ui02,ui03$ | 各成長クラスターの0歳未成熟個体が1歳まで生残して未成熟のままの確率 | $u0_{GC} * (1-m0_{GC})$ | 2016 cohort |
+| $ui11,ui12,ui13$ | 各成長クラスターの1歳未成熟個体が2歳まで生残して未成熟のままの確率 | $u1_{GC} * (1-m1_{GC})$ | 2016-2021 cohorts |
+| $um01,um02,um03$ | 各成長クラスターの0歳未成熟個体が1歳まで生残して成熟する確率 | $u0_{GC} * m0_{GC}$ | 2016 cohort |
+| $um11,um12,um13$ | 各成長クラスターの1歳未成熟個体が2歳まで生残して成熟する確率 | $u1_{GC} * m1$ | 2016-2021 cohorts |
+| $um2$ | 2歳未成熟個体が3歳まで生残して成熟する確率 | $u2_{GC} * m2_{GC}$ | 2019-2021 cohorts |
+| $f11,f12,f13$ | 各成長クラスターの1歳メスで期待される産卵数 | $\sum_{i=1}^{N_{GC}}E_i(x)/N_{GC}$ |  mature females at age-1 of 2016 cohort |
+| $f21,f22,f23$ | 各成長クラスターの2歳メスで期待される産卵数 | $\sum_{i=1}^{N_{GC}}E_i(x)/N_{GC}$ |  mature females at age-2 of 2016-2021 cohorts |
+| $f31,f32,f33$ | 各成長クラスターの3歳メスで期待される産卵数 | $\sum_{i=1}^{N_{GC}}E_i(x)/N_{GC}$ |  mature females at age-3 of 2016-2021 cohorts |
+
+**パラメータの追加説明**  
+H：2016年コホートの総数を、2015年に確認された成熟メスから期待される産卵数の合計で割ることで、卵から稚魚の生残率を計算している  
+p：2016年コホートで出現した各成長クラスターの個体数を総個体数で割ることで計算
+
+## *E(x)*: No. of eggs from female as a function of body length 
+```{r}
+# read raw data
+d0 <- read.csv("input_data/WRFS_Sato_2010_fishdata.csv")
+
+d1 <- d0 %>% 
+  dplyr::select(id,timing,treatment,fl,w,egg,noegg) %>% 
+  filter(noegg > 0)
+
+model <- glm(data = d1, noegg ~ fl, family = poisson(link="log"))
+summary(model)
+
+# formula 
+## masou ishikawae
+a1 = model$coefficients["(Intercept)"]
+b1 = model$coefficients["fl"]
+
+noegg_fl_1 <- function(x){
+  y = exp(a1 + b1*x)
+}
+
+## masou masou
+### The Ocean Ecology of Pacific Salmon and Trout, Chapter 6, Morita
+a2 = -9.00
+b2 = 2.76
+
+noegg_fl_2 <- function(x){
+  y = exp(a2 + b2*log(x))
+}
+
+# prediction
+preds <- ggpredict(model, terms = c("fl[all]"), ci_level = 0.95)
+
+preds <- tibble(
+  fl = as.numeric(preds$x),
+  predicted = preds$predicted,
+  conf.low = preds$conf.low,
+  conf.high = preds$conf.high,
+  y1 = noegg_fl_1(preds$x),
+  y2 = noegg_fl_2(preds$x)
+)
+
+# plot
+g <- 
+  ggplot(NULL) +
+  geom_jitter(data = d1, aes(x = fl, y = noegg), 
+              size = 4, height=0, width = 0.2, alpha=0.5) +
+  # prediction
+  geom_ribbon(data = preds, aes(x = fl, y = predicted,
+                                ymin = conf.low, ymax = conf.high),
+              alpha=0.1) +
+  geom_line(data = preds, aes(x = fl, y = predicted), linewidth = 2) +
+
+  # calculated value by two formulas
+  geom_line(data = preds, aes(x = fl, y = y1), linewidth = 2, color = "black") +
+  geom_line(data = preds, aes(x = fl, y = y2), linewidth = 2, color = "darkgray") +
+  annotate("text", x=130, y=130, color = "darkgray", size = 7, fontface="bold",
+           label="Yamame\n(Morita et al.)") +
+  annotate("text", x=180, y=70, color = "black", size = 7, fontface="bold",
+           label="Amago") +
+  labs(x = "Fork length (mm)", y = "No. of egg")
+g
+```
+
+## *H*: Egg survival (egg to age-0 June)
+sex ratio = 1:1
+```{r}
+# read raw data
+data1 <- read.csv("./input_data/rawdata_filtered.csv")
+data2 <- read.xlsx("input_data/WRFS_Data_241127.xlsx")
+gc <- read.csv("./output/k3_data.csv")
+
+# filtering
+d1 <- data1 %>% 
+  left_join(gc, by="id") %>% 
+  filter(year == cohort,
+         newsection == "C1" | newsection == "C2" | newsection == "C3" 
+         | newsection == "E1" | newsection == "E2" | newsection == "E3" | newsection == "Einter" 
+         | newsection == "L1" | newsection == "L2" | newsection == "L3") %>% 
+  distinct(id, year, .keep_all = TRUE)
+
+# number of 0+ in June
+age0jun <- count(d1, year, cohort)
+
+# filtering
+d2 <- data2 %>% 
+  # dplyr::select(id,year,month,fl,matureall,maturesex) %>% 
+  filter(newsection == "C1" | newsection == "C2" | newsection == "C3" 
+         | newsection == "E1" | newsection == "E2" | newsection == "E3" | newsection == "Einter" 
+         | newsection == "L1" | newsection == "L2" | newsection == "L3",
+         matureall == "1",
+         maturesex == "female") %>% 
+  filter(!grepl("\\?", fl)) %>% 
+  mutate(fl = as.numeric(fl))
+
+# number of mature-female in Oct
+mat_fem <- count(d2, year)
+
+# Formula: relationship between fork length and egg number
+d2 <- d2 %>% 
+  mutate(egg_num = noegg_fl_1(d2$fl))
+
+# plot
+g <- ggplot(d2,aes(x=fl, y=egg_num)) +
+  geom_point(alpha=0.8) + 
+  xlab("Fork length (mm)") +
+  ylab("No. of egg")
+g
+
+# summarize egg number
+sum_egg <- d2 %>% 
+  group_by(year) %>% 
+  summarise(sum = sum(egg_num)) %>% 
+  mutate(year = as.numeric(year) + 1) %>% 
+  left_join(age0jun, by = "year") %>% 
+  mutate(h0 = n / sum)
+
+# egg survival rate for 2016 cohort
+h0 <- sum_egg$h0[1]
+h0
+```
+
+## *p, s, h*: juvenile survival rate (egg to age-0 Oct)
+```{r}
+
+treat_list <- c("control","early","late")
+
+# read cjs data
+data3 <- read.csv("./output/phi_age0_2016cohort.csv")
+
+h_df <- tibble(
+  estimate = c(),
+  sd = c(),
+  growth = c(),
+  treatment = c()
+)
+
+for (treat in treat_list) {
+  # p: proportion of growth cluster for 2016 cohort
+  p_gc <- d1 %>% 
+    filter(cohort == 2016,
+           treatment == treat) %>% 
+    count(ocluster_rename)
+  p_gc <- p_gc$n / sum(p_gc$n)
+  
+  # s: survival rate June to Oct.
+  # filtering
+  d3 <- data3 %>% 
+    filter(treatment == treat)
+  
+  # calculate h1 - h4
+  h1 = d3$mean[1]*h0*p_gc[1]
+  h2 = d3$mean[2]*h0*p_gc[2]
+  h3 = d3$mean[3]*h0*(1-p_gc[1]-p_gc[2])
+  # make data frame
+  h_df_sub <- tibble(
+    growth = c(1,2,3),
+    parameter = paste0("h",growth),
+    estimate = c(h1,h2,h3),
+    sd = c(0,0,0),
+    treatment = c(treat,treat,treat),
+  )
+  h_df <- rbind(h_df,h_df_sub)
+}
+
+h_df
+```
+
+## *f*: fertility (number of eggs) 
+2歳での体サイズは2016年コホート（メス）が夏に達成した体サイズ(mm)とする
+```{r}
+# read data
+d0 <- read.csv("./input_data/rawdata_filtered.csv")
+gc <- read.csv("./output/k3_data.csv")
+
+# age-1 and age-3
+d1 <- d0 %>% 
+  left_join(gc, by="id") %>% 
+  mutate(growth_cluster = case_when(ocluster_rename == 1 ~ '1',
+                                    ocluster_rename == 2 ~ '2',
+                                    ocluster_rename == 3 ~ '3',
+                                    TRUE ~ "nd"),
+         fl = as.numeric(fl),
+         age = year - cohort) %>% 
+  filter(!grepl("\\?", fl),
+         fl != "nd",
+         growth_cluster != "nd",
+         treatment == 'control' | treatment == 'early' | treatment == 'late',
+         month == 9 | month == 10 | month == 11,
+         matureall == 1,
+         age != 0, age != 4,
+         sex == "female" | sex == "female?")
+
+# age-2
+# use August data
+d2 <- d0 %>% 
+  left_join(gc, by="id") %>% 
+  mutate(growth_cluster = case_when(ocluster_rename == 1 ~ '1',
+                                    ocluster_rename == 2 ~ '2',
+                                    ocluster_rename == 3 ~ '3',
+                                    TRUE ~ "nd"),
+         fl = as.numeric(fl),
+         age = year - cohort) %>% 
+  filter(!grepl("\\?", fl),
+         fl != "nd",
+         growth_cluster != "nd",
+         treatment == 'control' | treatment == 'early' | treatment == 'late',
+         age == 2,
+         sex == "female" | sex == "female?")
+
+# check data
+count(d1, age, growth_cluster)
+count(d2, age, growth_cluster)
+
+# summarize fork length and egg number for growth cluster
+# sex ratio = 1:1 in eggs
+# eggs(female) = total eggs / 2
+gc_egg1 <- d1 %>% 
+  mutate(egg_num = noegg_fl_1(fl)/2) %>% 
+  group_by(age, growth_cluster) %>% 
+  summarise(mean = mean(egg_num),
+            sd = sd(egg_num),
+            n = n(),
+            .groups = "drop") %>% 
+  mutate(id = paste0("f", as.character(age), as.character(growth_cluster)))
+gc_egg2 <- d2 %>% 
+  mutate(egg_num = noegg_fl_1(fl)/2) %>% 
+  group_by(age, growth_cluster) %>% 
+  summarise(mean = mean(egg_num),
+            sd = sd(egg_num),
+            n = n(),
+            .groups = "drop") %>% 
+  mutate(id = paste0("f", as.character(age), as.character(growth_cluster)))
+
+# make data frame
+f_df1 <- tibble(
+  growth = gc_egg1$growth_cluster,
+  parameter = gc_egg1$id,
+  estimate = gc_egg1$mean,
+  sd = gc_egg1$sd,
+  treatment = "control"
+)
+f_df2 <- tibble(
+  growth = gc_egg2$growth_cluster,
+  parameter = gc_egg2$id,
+  estimate = gc_egg2$mean,
+  sd = gc_egg2$sd,
+  treatment = "control"
+)
+f_df <- rbind(f_df1,f_df2)
+f_df
+```
+
+## *u*: immature-survival (Oct to Oct) 
+```{r}
+
+treat_list <- c("control","early","late")
+
+# read data
+d1<- read.csv("./output/phi_age0_1_oct_2016cohort.csv")
+d2<- read.csv("./output/phi_age1_2_oct_2016cohort.csv")
+d3<- read.csv("./output/phi_age2_3_age2mature.csv")
+
+u_df <- tibble(
+  growth = c(),
+  parameter = c(),
+  estimate = c(),
+  sd = c(),
+  treatment = c()
+)
+
+for (treat in treat_list) {
+  # age 0 to 1
+  phi_age01 <- d1 %>%
+    filter(treatment == treat) %>%
+    group_by(CL) %>%
+    summarise(mean = mean,
+              sd = sd,
+              .groups = "drop") %>%
+    mutate(growth = as.character(CL),
+           id = paste0("u0", growth))
+  # age 1 to 2
+  phi_age12 <- d2 %>% 
+    filter(treatment == treat,
+           age1_mature == 0) %>% 
+    group_by(CL) %>% 
+    summarise(mean = mean,
+              sd = sd,
+              .groups = "drop") %>% 
+    mutate(growth = as.character(CL),
+           id = paste0("u1", growth))
+  # age 2 to 3
+  phi_age23 <- d3 %>% 
+    filter(age == 3,
+           age2_maturity == 0) %>% 
+    group_by(age) %>% 
+    mutate(value = mean) %>% 
+    summarise(mean = mean(value),
+              sd = sd(value),
+              n = n(),
+              .groups = "drop") %>% 
+    mutate(growth = "non",
+           id = "u2")
+  
+  u_df_sub <- tibble(
+    growth = c(phi_age01$growth, phi_age12$growth, phi_age23$growth),
+    parameter = c(phi_age01$id, phi_age12$id, phi_age23$id),
+    estimate = c(phi_age01$mean, phi_age12$mean, phi_age23$mean),
+    sd = c(phi_age01$sd, phi_age12$sd, phi_age23$sd),
+    treatment = treat
+  )
+  u_df <- rbind(u_df,u_df_sub)
+}
+u_df
+```
+
+## *v*: mature-survival (Oct to Oct) 
+```{r}
+
+treat_list <- c("control","early","late")
+
+# read data
+d2 <- read.csv("./output/phi_age1_2_oct_2016cohort.csv")
+d3 <- read.csv("./output/phi_age2_3_age2mature.csv")
+
+v_df <- tibble(
+  parameter = c(),
+  estimate = c(),
+  sd = c(),
+  treatment = c()
+)
+
+for (treat in treat_list) {
+  # age 1 to 2
+  phi_age12 <- d2 %>% 
+    filter(treatment == treat,
+           age1_mature == 1) %>% 
+    group_by(CL) %>% 
+    summarise(mean = mean,
+              sd = sd,
+              .groups = "drop") %>% 
+    mutate(growth = as.character(CL),
+           id = paste0("v1", growth))
+  # age 2 to 3
+  phi_age23 <- d3 %>% 
+    filter(age == 3,
+           age2_maturity == 1) %>% 
+    group_by(age) %>% 
+    mutate(value = mean) %>% 
+    summarise(mean = mean(value),
+              sd = sd(value),
+              n = n(),
+              .groups = "drop") %>% 
+    mutate(growth = "non",
+           id = "v2")
+  
+  v_df_sub <- tibble(
+    growth = c(phi_age12$growth, phi_age23$growth),
+    parameter = c(phi_age12$id, phi_age23$id),
+    estimate = c(phi_age12$mean, phi_age23$mean),
+    sd = c(phi_age12$sd, phi_age23$sd),
+    treatment = treat
+  )
+  v_df <- rbind(v_df,v_df_sub)
+}
+v_df
+```
+
+## *m*: prob. of maturation
+1際成熟確率：GLMの結果、ControlとLate処理のデータを統合するモデルのAICが最も高くなったため（差がない）、この2処理は同じ値を使用する  
+2歳成熟、3際成熟は成長クラスターごとに推定できていないため、同じ値を使用する
+```{r}
+
+treat_list <- c("control","early","late")
+
+# age-1 maturity
+## read data
+d1 <- read.csv("./output/predict_prob_age1maturity.csv")
+
+m_df <- tibble(
+  growth = c(),
+  parameter = c(),
+  estimate = c(),
+  sd = c(),
+  treatment = c()
+)
+
+# control
+dsub <- d1 %>% 
+  filter(treatment == "control,late")
+m_df_sub <- tibble(
+  growth = dsub$growth_cluster,
+  parameter = paste0("m0",growth),
+  estimate = dsub$predicted,
+  sd = dsub$sd,
+  treatment = "control"
+)
+m_df <- rbind(m_df,m_df_sub)
+# early
+dsub <- d1 %>% 
+  filter(treatment == "early")
+m_df_sub <- tibble(
+  growth = dsub$growth_cluster,
+  parameter = paste0("m0",growth),
+  estimate = dsub$predicted,
+  sd = dsub$sd,
+  treatment = "early"
+)
+m_df <- rbind(m_df,m_df_sub)
+# late
+dsub <- d1 %>% 
+  filter(treatment == "control,late")
+m_df_sub <- tibble(
+  growth = dsub$growth_cluster,
+  parameter = paste0("m0",growth),
+  estimate = dsub$predicted,
+  sd = dsub$sd,
+  treatment = "late"
+)
+m_df <- rbind(m_df,m_df_sub)
+
+# age-2 maturity
+## read data
+d1 <- read.csv("./output/predict_prob_age2maturity.csv")
+
+m_df_sub <- tibble(
+  growth = "non",
+  parameter = "m1",
+  estimate = d1$predicted,
+  sd = d1$sd,
+  treatment = d1$treatment)
+m_df <- rbind(m_df,m_df_sub)
+
+# age-3 maturity
+## Age 3 maturation = 1.0
+
+m_df_sub <- tibble(
+  growth = "non",
+  parameter = "m2",
+  estimate = 1,
+  sd = 0,
+  treatment = c("control","early","late")
+)
+m_df <- rbind(m_df,m_df_sub)
+m_df
+```
+
+## output: parameter list 
+
+```{r}
+# h (hatching): 3
+# f (fertility): 9
+# u (juvenile to juvenile survival): 7
+# v (adult to adult survival): 4
+# m (maturation): 5
+
+para <- rbind(h_df,f_df,u_df,v_df,m_df)
+
+para_c <- para %>% 
+  filter(treatment == "control") %>% 
+  dplyr::select(parameter,estimate,sd) %>% 
+  rename(estimate_control = estimate,
+         sd_control = sd)
+para_e <- para %>% 
+  filter(treatment == "early") %>% 
+  dplyr::select(parameter,estimate,sd) %>% 
+  rename(estimate_early = estimate,
+         sd_early = sd)
+para_l<- para %>% 
+  filter(treatment == "late") %>% 
+  dplyr::select(parameter,estimate,sd) %>% 
+  rename(estimate_late = estimate,
+         sd_late = sd)
+
+# make new parameter data frame
+para_list <- tibble(
+  parameter = c(
+    "h1","h2","h3",
+    "f11","f12","f13","f21","f22","f23","f31","f32","f33",
+    "u01","u02","u03","u11","u12","u13","u2",
+    "v11","v12","v13","v2",
+    "m01","m02","m03","m1","m2"
+    )) %>% 
+  left_join(para_c, by = "parameter") %>% 
+  left_join(para_e, by = "parameter") %>% 
+  left_join(para_l, by = "parameter")
+
+# NA to "-"
+para_list2 <- para_list %>% mutate_all(as.character)
+para_list2[is.na(para_list2)] <- "-"
+para_list2
+
+# out to csv
+write.csv(para_list2, "./output/parameters_for_matrix_population_model_with_3GC.csv")
+```
+
+
