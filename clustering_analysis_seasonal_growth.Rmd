@@ -33,20 +33,24 @@ theme_set(
           axis.text = element_text(size=15, family="sans"),
           legend.title = element_text(size = 15, family="sans", face="bold"),
           legend.text = element_text(size = 15, family="sans"),
-          legend.position = 'right')
+          legend.position = 'right',
+          plot.caption = element_text(size = 12))
   )
 
 ```
 
 # prepare input data
 
-data: 2016-cohort  
+data: 2015 and 2016 cohorts  
 
 ```{r}
 
-# copy iput file
-# file.copy("/Users/nodashouhei/R/20240802_WRFS_Omi_mark-recapture/output/id_list.csv","./input_data/id_list.csv")
-# file.copy("/Users/nodashouhei/R/20240802_WRFS_Omi_mark-recapture/output/rawdata_filtered.csv","./input_data/rawdata_filtered.csv")
+# remove files
+file.remove("./input_data/id_list.csv")
+file.remove("./input_data/rawdata_filtered.csv")
+# copy input file
+file.copy("/Users/nodashouhei/R/20240802_WRFS_Omi_mark-recapture/output/id_list.csv","./input_data/id_list.csv")
+file.copy("/Users/nodashouhei/R/20240802_WRFS_Omi_mark-recapture/output/rawdata_filtered.csv","./input_data/rawdata_filtered.csv")
 
 # AIC and BIC list
 aic_bic <- data.frame(clu = c(),
@@ -57,6 +61,136 @@ aic_bic <- data.frame(clu = c(),
 
 
 # Estimation of growth trajectries using the finite mixture model
+## no. of cluster = 1  
+```{r}
+# number of k
+kk <- 1
+
+# output name
+csv_name <- paste("./output/k", kk, "_data.csv", sep = "")
+
+# read data
+data <- read.csv("input_data/rawdata_filtered.csv")
+
+# filtering
+# remove individuals only captured once
+data <- data %>%
+  filter(cohort == 2015 | cohort == 2016,
+         treatment == 'early' | treatment == 'late' | treatment == 'control',
+         days_from_hatching < 1500)
+count(data, cohort, treatment)
+
+# von bertalanffy growth model
+sbgm <- function(lmax,lmin,a1,theta,t0=0,t){
+  (lt <- lmax-(lmax-lmin)*exp(-a1*(t-t0)-180*a1/pi*(cos(pi*(t0+theta)/180)-cos(pi*(t+theta)/180))))
+}
+
+# functions
+llsbgm <- function(para,data){
+  lmax <- exp(para[1])
+  lmin <- exp(para[2])
+  a1 <- exp(para[3])
+  theta <- para[4]
+  t <- data[,1]
+  lobs <- data[,2]
+  ll <- -log(dnorm(log(lobs),log(sbgm(lmax,lmin,a1,theta,t=t)),sd=sd(log(lobs))))
+  sum(ll)
+}
+
+llsbgm2 <- function(para,data){
+  lmax <- exp(para[1])
+  lmin <- exp(para[2])
+  a1 <- exp(para[3])
+  theta <- para[4]
+  t <- data[,1]
+  lobs <- data[,2]
+  ll <- -log(dnorm(log(lobs),log(sbgm(lmax,lmin,a1,theta,t=t)),sd=sd(log(lobs))))
+  ll
+}
+
+ipara <- c(log(max(data$fl)),log(min(data$fl)),log(1.7E-4),0)
+
+lmax <- exp(ipara[1])
+lmin <- exp(ipara[2])
+a1 <- exp(ipara[3])
+theta <- ipara[4]
+
+t <- seq(0,max(data$days_from_hatching),by=1)
+
+llsbgm(ipara,data[,c("days_from_hatching","fl")])
+summary(llsbgm2(ipara,data[,c("days_from_hatching","fl")]))
+
+# single cluster (Models that do not assume growth classes)
+res <- optim(ipara,llsbgm,data=data[,c("days_from_hatching","fl")])
+
+#AIC
+sum(res$value)+2*5
+#BIC
+sum(res$value)+5*log(nrow(data))
+
+lmax <- exp(res$par[1])
+lmin <- exp(res$par[2])
+a1 <- exp(res$par[3])
+theta <- res$par[4]
+
+# plot
+plot(t,sbgm(lmax,lmin,a1,theta,t=t), type="l", lwd = 3, ylim=c(0,max(data$fl)), 
+     font.lab=1,
+     xlab="No. of days since January-1",ylab="Fork length (mm)",
+     cex.lab=1.5, cex.axis=1, las=1)
+points(fl~days_from_hatching,data=data,
+       cex=0.8, col=rgb(0, 0, 0,　alpha=0.5))
+
+data$predfl <- sbgm(lmax,lmin,a1,theta,t=data$days_from_hatching)
+data$resid <- log(data$fl)-log(data$predfl)
+
+# model
+m1 <- FLXMRglm(resid~1,family="gaussian")
+
+set.seed(1)
+
+mp2 <- flexmix(.~.|id, data=data, model=list(m1), k=kk, 
+               control=list(iter=200,minprior=0,nrep=3,classify="random"))
+
+# show summary
+summary(mp2)
+
+data$cluster <- clusters(mp2)
+
+k <- sort(unique(data$cluster))
+
+ipara <- res$par
+uid <- sort(unique(data$id))
+
+ll <- as.numeric()
+oll <- 1
+set.seed(1)
+while(abs(sum(ll)-sum(oll))>0.1){
+  # M step
+  oll <- ll
+  ll <- as.numeric()
+  estpara <- as.numeric()
+  for(cl in k){
+    res <- optim(ipara,llsbgm,data=data[data$cluster==cl,c("days_from_hatching","fl")])
+    estpara <- rbind(estpara,res$par)
+    data[,paste("ll",cl,sep="-")]<- llsbgm2(res$par,data[,c("days_from_hatching","fl")])
+    ll <- c(ll,res$value)
+  }
+}
+data$ocluster <- data$cluster
+
+#AIC
+aic <- sum(ll)+2*max(k)*5
+#BIC
+bic <- sum(ll)+max(k)*5*log(nrow(data))
+
+# make new data frame
+add_data <- data.frame(clu = kk,
+                       aic = aic,
+                       bic = bic)
+aic_bic <- rbind(aic_bic, add_data)
+```
+
 ## no. of cluster = 2 
 ```{r}
 # number of k
@@ -71,10 +205,12 @@ data <- read.csv("input_data/rawdata_filtered.csv")
 # filtering
 # remove individuals only captured once
 data <- data %>%
-  filter(cohort == 2016,
-         treatment == 'early' | treatment == 'late' | treatment == 'control')
+  filter(cohort == 2015 | cohort == 2016,
+         treatment == 'early' | treatment == 'late' | treatment == 'control',
+         days_from_hatching < 1500)
+count(data, cohort, treatment)
 
-## von bertalanffy growth model ----------------------------------------------
+# von bertalanffy growth model
 sbgm <- function(lmax,lmin,a1,theta,t0=0,t){
   (lt <- lmax-(lmax-lmin)*exp(-a1*(t-t0)-180*a1/pi*(cos(pi*(t0+theta)/180)-cos(pi*(t+theta)/180))))
 }
@@ -260,7 +396,8 @@ for(i in num_lis) {
               exp(estpara2[i,2]), 
               exp(estpara2[i,3]), 
               estpara2[i,4], 
-              t=t))
+              t=t)) %>% 
+    filter(t >= min(data$days_from_hatching))
   # plot
   g <- g +
     geom_point(data = data[data$ocluster_rename==i,],
@@ -296,10 +433,12 @@ data <- read.csv("input_data/rawdata_filtered.csv")
 # filtering
 # remove individuals only captured once
 data <- data %>%
-  filter(cohort == 2016,
-         treatment == 'early' | treatment == 'late' | treatment == 'control')
+  filter(cohort == 2015 | cohort == 2016,
+         treatment == 'early' | treatment == 'late' | treatment == 'control',
+         days_from_hatching < 1500)
+count(data, cohort, treatment)
 
-## von bertalanffy growth model ----------------------------------------------
+# von bertalanffy growth model
 sbgm <- function(lmax,lmin,a1,theta,t0=0,t){
   (lt <- lmax-(lmax-lmin)*exp(-a1*(t-t0)-180*a1/pi*(cos(pi*(t0+theta)/180)-cos(pi*(t+theta)/180))))
 }
@@ -485,7 +624,8 @@ for(i in num_lis) {
               exp(estpara2[i,2]), 
               exp(estpara2[i,3]), 
               estpara2[i,4], 
-              t=t))
+              t=t)) %>% 
+    filter(t >= min(data$days_from_hatching))
   # plot
   g <- g +
     geom_point(data = data[data$ocluster_rename==i,],
@@ -521,10 +661,12 @@ data <- read.csv("input_data/rawdata_filtered.csv")
 # filtering
 # remove individuals only captured once
 data <- data %>%
-  filter(cohort == 2016,
-         treatment == 'early' | treatment == 'late' | treatment == 'control')
+  filter(cohort == 2015 | cohort == 2016,
+         treatment == 'early' | treatment == 'late' | treatment == 'control',
+         days_from_hatching < 1500)
+count(data, cohort, treatment)
 
-## von bertalanffy growth model ----------------------------------------------
+# von bertalanffy growth model
 sbgm <- function(lmax,lmin,a1,theta,t0=0,t){
   (lt <- lmax-(lmax-lmin)*exp(-a1*(t-t0)-180*a1/pi*(cos(pi*(t0+theta)/180)-cos(pi*(t+theta)/180))))
 }
@@ -710,7 +852,8 @@ for(i in num_lis) {
               exp(estpara2[i,2]), 
               exp(estpara2[i,3]), 
               estpara2[i,4], 
-              t=t))
+              t=t)) %>% 
+    filter(t >= min(data$days_from_hatching))
   # plot
   g <- g +
     geom_point(data = data[data$ocluster_rename==i,],
@@ -746,10 +889,12 @@ data <- read.csv("input_data/rawdata_filtered.csv")
 # filtering
 # remove individuals only captured once
 data <- data %>%
-  filter(cohort == 2016,
-         treatment == 'early' | treatment == 'late' | treatment == 'control')
+  filter(cohort == 2015 | cohort == 2016,
+         treatment == 'early' | treatment == 'late' | treatment == 'control',
+         days_from_hatching < 1500)
+count(data, cohort, treatment)
 
-## von bertalanffy growth model ----------------------------------------------
+# von bertalanffy growth model
 sbgm <- function(lmax,lmin,a1,theta,t0=0,t){
   (lt <- lmax-(lmax-lmin)*exp(-a1*(t-t0)-180*a1/pi*(cos(pi*(t0+theta)/180)-cos(pi*(t+theta)/180))))
 }
@@ -934,7 +1079,8 @@ for(i in num_lis) {
               exp(estpara2[i,2]), 
               exp(estpara2[i,3]), 
               estpara2[i,4], 
-              t=t))
+              t=t)) %>% 
+    filter(t >= min(data$days_from_hatching))
   # plot
   g <- g +
     geom_point(data = data[data$ocluster_rename==i,],
@@ -970,10 +1116,12 @@ data <- read.csv("input_data/rawdata_filtered.csv")
 # filtering
 # remove individuals only captured once
 data <- data %>%
-  filter(cohort == 2016,
-         treatment == 'early' | treatment == 'late' | treatment == 'control')
+  filter(cohort == 2015 | cohort == 2016,
+         treatment == 'early' | treatment == 'late' | treatment == 'control',
+         days_from_hatching < 1500)
+count(data, cohort, treatment)
 
-## von bertalanffy growth model ----------------------------------------------
+# von bertalanffy growth model
 sbgm <- function(lmax,lmin,a1,theta,t0=0,t){
   (lt <- lmax-(lmax-lmin)*exp(-a1*(t-t0)-180*a1/pi*(cos(pi*(t0+theta)/180)-cos(pi*(t+theta)/180))))
 }
@@ -1158,7 +1306,8 @@ for(i in num_lis) {
               exp(estpara2[i,2]), 
               exp(estpara2[i,3]), 
               estpara2[i,4], 
-              t=t))
+              t=t)) %>% 
+    filter(t >= min(data$days_from_hatching))
   # plot
   g <- g +
     geom_point(data = data[data$ocluster_rename==i,],
@@ -1180,7 +1329,238 @@ write.csv(data2,csv_name, row.names = FALSE)
 count(data2, ocluster_rename)
 ```
 
-# Check BIC 
+## no. of cluster = 7
+```{r}
+# number of k
+kk <- 7
+
+# output name
+csv_name <- paste("./output/k", kk, "_data.csv", sep = "")
+
+# read data
+data <- read.csv("input_data/rawdata_filtered.csv")
+
+# filtering
+# remove individuals only captured once
+data <- data %>%
+  filter(cohort == 2015 | cohort == 2016,
+         treatment == 'early' | treatment == 'late' | treatment == 'control',
+         days_from_hatching < 1500)
+count(data, cohort, treatment)
+
+# von bertalanffy growth model
+sbgm <- function(lmax,lmin,a1,theta,t0=0,t){
+  (lt <- lmax-(lmax-lmin)*exp(-a1*(t-t0)-180*a1/pi*(cos(pi*(t0+theta)/180)-cos(pi*(t+theta)/180))))
+}
+
+# functions
+llsbgm <- function(para,data){
+  lmax <- exp(para[1])
+  lmin <- exp(para[2])
+  a1 <- exp(para[3])
+  theta <- para[4]
+  t <- data[,1]
+  lobs <- data[,2]
+  ll <- -log(dnorm(log(lobs),log(sbgm(lmax,lmin,a1,theta,t=t)),sd=sd(log(lobs))))
+  sum(ll)
+}
+
+llsbgm2 <- function(para,data){
+  lmax <- exp(para[1])
+  lmin <- exp(para[2])
+  a1 <- exp(para[3])
+  theta <- para[4]
+  t <- data[,1]
+  lobs <- data[,2]
+  ll <- -log(dnorm(log(lobs),log(sbgm(lmax,lmin,a1,theta,t=t)),sd=sd(log(lobs))))
+  ll
+}
+
+ipara <- c(log(max(data$fl)),log(min(data$fl)),log(1.7E-4),0)
+
+lmax <- exp(ipara[1])
+lmin <- exp(ipara[2])
+a1 <- exp(ipara[3])
+theta <- ipara[4]
+
+t <- seq(0,max(data$days_from_hatching),by=1)
+
+llsbgm(ipara,data[,c("days_from_hatching","fl")])
+summary(llsbgm2(ipara,data[,c("days_from_hatching","fl")]))
+
+# single cluster (Models that do not assume growth classes)
+res <- optim(ipara,llsbgm,data=data[,c("days_from_hatching","fl")])
+
+#AIC
+sum(res$value)+2*5
+#BIC
+sum(res$value)+5*log(nrow(data))
+
+lmax <- exp(res$par[1])
+lmin <- exp(res$par[2])
+a1 <- exp(res$par[3])
+theta <- res$par[4]
+
+# plot
+plot(t,sbgm(lmax,lmin,a1,theta,t=t), type="l", lwd = 3, ylim=c(0,max(data$fl)), 
+     font.lab=1,
+     xlab="No. of days since January-1",ylab="Fork length (mm)",
+     cex.lab=1.5, cex.axis=1, las=1)
+points(fl~days_from_hatching,data=data,
+       cex=0.8, col=rgb(0, 0, 0,　alpha=0.5))
+
+data$predfl <- sbgm(lmax,lmin,a1,theta,t=data$days_from_hatching)
+data$resid <- log(data$fl)-log(data$predfl)
+
+# model
+m1 <- FLXMRglm(resid~1,family="gaussian")
+
+set.seed(1)
+
+mp2 <- flexmix(.~.|id, data=data, model=list(m1), k=kk, 
+               control=list(iter=200,minprior=0,nrep=3,classify="random"))
+
+# show summary
+summary(mp2)
+
+data$cluster <- clusters(mp2)
+
+k <- sort(unique(data$cluster))
+
+ipara <- res$par
+uid <- sort(unique(data$id))
+
+ll <- as.numeric()
+oll <- 1
+set.seed(1)
+while(abs(sum(ll)-sum(oll))>0.1){
+  # M step
+  oll <- ll
+  ll <- as.numeric()
+  estpara <- as.numeric()
+  for(cl in k){
+    res <- optim(ipara,llsbgm,data=data[data$cluster==cl,c("days_from_hatching","fl")])
+    estpara <- rbind(estpara,res$par)
+    data[,paste("ll",cl,sep="-")]<- llsbgm2(res$par,data[,c("days_from_hatching","fl")])
+    ll <- c(ll,res$value)
+  }
+}
+data$ocluster <- data$cluster
+# E step
+for(cid in uid){
+  dmy <- data[data$id==cid,]
+  cll <- apply(dmy[,paste("ll",k,sep="-")],2,sum)
+  data[data$id==cid,]$cluster <- which(cll==min(cll))
+}
+print(c(sum(ll),sum(oll)))
+
+
+data$ocluster <- data$cluster
+
+#AIC
+aic <- sum(ll)+2*max(k)*5
+#BIC
+bic <- sum(ll)+max(k)*5*log(nrow(data))
+
+# make new data frame
+add_data <- data.frame(clu = kk,
+                       aic = aic,
+                       bic = bic)
+aic_bic <- rbind(aic_bic, add_data)
+
+# sorting
+par(mfrow=c(1,max(k)))
+
+# make new data frame
+ocluster <- c()
+max_len <- c()
+clu_max_len <- data.frame(ocluster,max_len)
+
+for(ocluster in k){
+  tmp = data[data$ocluster==ocluster,]
+  tmp = tmp[tmp$days_from_hatching<300,]
+  max_len = max(tmp$fl)
+  # make new data frame
+  add_data <- data.frame(ocluster, max_len)
+  clu_max_len <- rbind(clu_max_len, add_data)
+}
+
+
+# sort by max length
+clu_max_len <- clu_max_len[order(clu_max_len$max_len, decreasing=T),]
+# create a sequential list
+x <- 1:kk
+# make new data frame
+add_data <- data.frame(x)
+names(add_data) <- c("ocluster_rename")
+# bind
+clu_max_len <- cbind(clu_max_len, add_data)
+# merge
+data <- left_join(data, clu_max_len, by=c("ocluster"="ocluster"))
+
+# Change the order of the growth curves
+# merge a sequential list
+estpara2 <- cbind(estpara, x)
+# make new data frame
+estpara2 <- data.frame(estpara2)
+# merge
+estpara2 <- left_join(estpara2, clu_max_len, by=c("x"="ocluster"))
+# sort
+estpara2 <- estpara2[order(estpara2$ocluster_rename),]
+# remove columns
+estpara2 <- estpara2[,-5]
+# convert matrix
+estpara2 <- matrix(as.matrix(estpara2), nrow(estpara2), ncol(estpara2))
+
+### plot growth history
+kkk <- max(k)
+if (max(k) == kk) {
+  num_lis <- seq(1,kk,1)
+} else {
+  num_lis <- seq(1,kkk,1)
+}
+
+# plot
+# color list
+cb = brewer.pal(kk, "RdYlBu")
+
+g <- ggplot(NULL)
+for(i in num_lis) {
+  # data
+  growth_curve <- tibble(
+    t = t,
+    fl = sbgm(exp(estpara2[i,1]), 
+              exp(estpara2[i,2]), 
+              exp(estpara2[i,3]), 
+              estpara2[i,4], 
+              t=t)) %>% 
+    filter(t >= min(data$days_from_hatching))
+  # plot
+  g <- g +
+    geom_point(data = data[data$ocluster_rename==i,],
+               aes(x = days_from_hatching, y = fl), 
+               size = 2, alpha = 0.5, fill = cb[i],
+               shape = 21, colour = "black") +
+    geom_line(data = growth_curve, aes(x = t, y = fl),
+              linewidth = 2, alpha=1, col = cb[i]) +
+    labs(title = paste0(as.character(i), " clusters"), 
+         x = "No. of days since January-1", 
+         y = "Fork length (mm)")
+}
+g
+
+# out to csv
+data2 <- aggregate(ocluster_rename~id,data,unique)
+write.csv(data2,csv_name, row.names = FALSE)
+
+count(data2, ocluster_rename)
+```
+
+# Check AIC and BIC 
+AIC：パラメータの数に応じて一定のペナルティを課す。  BIC：パラメータの数とサンプルサイズに応じてペナルティを課す。   
+→ BICは大規模データセットにおいて過剰適合（オーバーフィッティング）を回避し、よりシンプルなモデルを選びやすい特徴がある。  
+今回のサンプルサイズは大きいため、BICの方が適しているかもしれない。
+
 ```{r}
 
 aic_bic
@@ -1188,11 +1568,17 @@ aic_bic
 write.csv(aic_bic, "output/flexmix_bic.csv")
 
 # plot 
-ggplot(aic_bic,aes(x=clu,y=bic)) +
-  geom_line(linewidth = 2) +
-  geom_point(size = 5) + 
-  xlab("Number of cluster") +
-  ylab("BIC")
+ggplot(NULL) +
+  # AIC
+  geom_line(data = aic_bic, aes(x=clu, y=aic), linewidth = 2, color = "gray66") +
+  geom_point(data = aic_bic, aes(x=clu, y=aic), size = 5, color = "gray66") + 
+  # BIC
+  geom_line(data = aic_bic, aes(x=clu, y=bic), linewidth = 2) +
+  geom_point(data = aic_bic, aes(x=clu, y=bic), size = 5) + 
+  labs(x = "Number of cluster", 
+       y = "Value",
+       caption = "AIC: gray, BIC: black")
+  
 
 ```
 
@@ -1226,5 +1612,36 @@ g <- ggplot(NULL) +
 g
 
 ```
+
+Best cluster: 4
+
+```{r}
+# read data
+d0 <- read.csv("./input_data/rawdata_filtered.csv")
+d_gc <- read.csv("./output/k4_data.csv")
+
+# filtering
+d1 <- d0 %>% 
+  left_join(d_gc, by="id") %>%
+  filter(ocluster_rename %in% c(1,2,3,4)) %>% 
+  mutate(growth = as.character(ocluster_rename))
+
+# plot
+color_list = brewer.pal(4, "RdYlBu") # color list
+color_list = c("#D7191C","#FDAE61","#ABD9E9","#2C7BB6")
+
+g <- ggplot(NULL) +
+  geom_line(data = d1, aes(x = days_from_hatching, y = fl, 
+                           group = id, color = growth),
+              linewidth = 0.5, alpha=0.8) +
+    labs(x = "No. of days since January-1", 
+         y = "Fork length (mm)") +
+  scale_color_manual('glowth cluster: ', values = color_list) +
+  theme(legend.position = 'top')
+g
+
+```
+
+
 
 

@@ -24,12 +24,12 @@ output:
 * "rawdata/WRFS_Data_241127.xlsx"：捕獲調査の生データ
 * "output/rawdata_filtered.csv"：捕獲調査の生データに生活史情報を結合したデータ
 * "output/k3_data.csv"：個体を成長パターンでクラスタリングしたデータ（成長クラスター）
-* "output/phi_age0_2016cohort.csv"：2016年コホートにおける０歳10月までの生残率をCJSモデルで推定した結果
-* "output/phi_age0_1_oct_2016cohort.csv"：０歳10月から1歳10月までの生残率をCJSモデルで推定した結果
-* "output/phi_age1_2_oct_2016cohort.csv"：1歳10月から2歳10月までの生残率をCJSモデルで推定した結果
+* "output/phi_age0_2016cohort_GC3.csv"：2016年コホートにおける０歳10月までの生残率をCJSモデルで推定した結果
+* "output/phi_age0_1_oct_2016cohort_GC3.csv"：０歳10月から1歳10月までの生残率をCJSモデルで推定した結果
+* "output/phi_age1_2_oct_2016cohort_GC3.csv"：1歳10月から2歳10月までの生残率をCJSモデルで推定した結果
 * "output/phi_age2_3_age2mature.csv"：2歳10月から3歳10月までの生残率をCJSモデルで推定した結果
-* "output/predict_prob_age1maturity.csv"：GLMによる1際成熟確率の推定結果
-* "output/predict_prob_age2maturity.csv"：GLMによる2際成熟確率の推定結果
+* "output/predict_prob_age1maturity_GC3.csv"：GLMによる1際成熟確率の推定結果
+* "output/predict_prob_age2maturity_GC3.csv"：GLMによる2際成熟確率の推定結果
 
 <style>
 body {
@@ -69,26 +69,26 @@ theme_set(
 | Parameters  | Definition  | Formula     | Data        |
 |:------------|:------------|:------------|:------------|
 | $E(x)$ | メスの体サイズ(mm)から期待される産卵数 | $\exp(-9.0 + 2.76 * \log(x))$ | Sato et al. unpublished data |
-| $H$ | 稚魚が0歳5月まで生残する確率 | $N_{juvenile}/\sum_{i=1}^{N_{female}}E_i(x)$ | mature females at 2015 and 2016 cohort |
+| $H$ | 稚魚が0歳5月まで生残する確率 | $N_{juvenile}/\sum_{i=1}^{N_{female}}E_i(x)$ | 2015 - 2023 cohorts |
 | $s1,s2,s3$ | 各成長クラスターの0歳5月から10月まで生残する確率 | $CJS\;model$ | 2016 cohorts |
-| $p1,p2,p3$ | コホートにおける各成長クラスター(GC)の割合<br>p1: GC1<br>p2: GC2<br>p3: GC3<br>(1-p1-p2-p3): GC4 | $N_{GC}/N_{total}$ | 2016 cohort |
-| $h1,h2,h3$ | 卵から各成長クラスターの稚魚が出現する確率 | $H*s_{GC}*p_{GC}$ | 2016 cohort |
+| $p1,p2,p3$ | コホートにおける各成長クラスター(GC)の割合<br>p1: GC1<br>p2: GC2<br>(1-p1-p2): GC3 | $N_{GC}/N_{total}$ | 2016 cohort |
+| $h1,h2,h3$ | 卵から各成長クラスターの稚魚が出現する確率 | $H*s_{GC}*p_{GC}$ | 2015 - 2023 cohorts |
 | $u01,u02,u03$ | 各成長クラスターが0歳10月から1歳10月まで生残する確率 | $CJS\;model$ | 2016 cohort |
 | $u11,u12,u13$ | 各成長クラスターの未成熟個体が1歳10月から2歳8月まで生残する確率 | $CJS\;model$ | 2016 cohort |
 | $u2$ | 未成熟個体が2歳10月から3歳10月まで生残する確率 | $CJS\;model$ | 2019-2021 cohorts |
 | $m01,m02,m03$ | 各成長クラスターの1歳での成熟確率 | $GLM_{binominal}$ <br> $prob. of maturation \sim GC * treatment$ | 2016 cohort |
-| $m1$ | 2歳での成熟確率 | $GLM_{binominal}$ <br> $prob. of maturation \sim treatment$ | 2015 cohort |
+| $m11,m12,m13$ | 2歳での成熟確率 | $GLM_{binominal}$ <br> $prob. of maturation \sim treatment$ | 2015 cohort |
 | $m2$ | 3歳での成熟確率(=1.0) | non | non |
 | $v11,v12,v13$ | 各成長クラスターの成熟個体が1歳10月から2歳8月まで生残する確率 | $CJS\;model$ | 2016 cohort |
 | $v2$ | 成熟個体が2歳10月から3歳10月まで生残する確率 | $CJS\;model$ | 2019-2021 cohorts |
 | $ui01,ui02,ui03$ | 各成長クラスターの0歳未成熟個体が1歳まで生残して未成熟のままの確率 | $u0_{GC} * (1-m0_{GC})$ | 2016 cohort |
 | $ui11,ui12,ui13$ | 各成長クラスターの1歳未成熟個体が2歳まで生残して未成熟のままの確率 | $u1_{GC} * (1-m1_{GC})$ | 2016-2021 cohorts |
 | $um01,um02,um03$ | 各成長クラスターの0歳未成熟個体が1歳まで生残して成熟する確率 | $u0_{GC} * m0_{GC}$ | 2016 cohort |
-| $um11,um12,um13$ | 各成長クラスターの1歳未成熟個体が2歳まで生残して成熟する確率 | $u1_{GC} * m1$ | 2016-2021 cohorts |
+| $um11,um12,um13$ | 各成長クラスターの1歳未成熟個体が2歳まで生残して成熟する確率 | $u1_{GC} * m1_{GC}$ | 2016-2021 cohorts |
 | $um2$ | 2歳未成熟個体が3歳まで生残して成熟する確率 | $u2_{GC} * m2_{GC}$ | 2019-2021 cohorts |
-| $f11,f12,f13$ | 各成長クラスターの1歳メスで期待される産卵数 | $\sum_{i=1}^{N_{GC}}E_i(x)/N_{GC}$ |  mature females at age-1 of 2016 cohort |
-| $f21,f22,f23$ | 各成長クラスターの2歳メスで期待される産卵数 | $\sum_{i=1}^{N_{GC}}E_i(x)/N_{GC}$ |  mature females at age-2 of 2016-2021 cohorts |
-| $f31,f32,f33$ | 各成長クラスターの3歳メスで期待される産卵数 | $\sum_{i=1}^{N_{GC}}E_i(x)/N_{GC}$ |  mature females at age-3 of 2016-2021 cohorts |
+| $f11,f12,f13$ | 各成長クラスターの1歳メスで期待される産卵数 | $\sum_{i=1}^{N_{GC}}E_i(x)/N_{GC}$ |  mature females at age-1 of 2015-2016 cohorts |
+| $f21,f22,f23$ | 各成長クラスターの2歳メスで期待される産卵数 | $\sum_{i=1}^{N_{GC}}E_i(x)/N_{GC}$ |  mature females at age-2 of 2015-2016 cohorts |
+| $f3$ | 3歳メスで期待される産卵数 | $\sum_{i=1}^{N}E_i(x)/N$ |  mature females at age-3 of 2015-2016 cohorts |
 
 **パラメータの追加説明**  
 H：2016年コホートの総数を、2015年に確認された成熟メスから期待される産卵数の合計で割ることで、卵から稚魚の生残率を計算している  
@@ -209,10 +209,11 @@ sum_egg <- d2 %>%
   summarise(sum = sum(egg_num)) %>% 
   mutate(year = as.numeric(year) + 1) %>% 
   left_join(age0jun, by = "year") %>% 
-  mutate(h0 = n / sum)
+  mutate(h0 = n / sum) %>% 
+  filter(year < 2024)
 
-# egg survival rate for 2016 cohort
-h0 <- sum_egg$h0[1]
+# calculate mean egg survival rate
+h0 <- mean(sum_egg$h0)
 h0
 ```
 
@@ -222,7 +223,7 @@ h0
 treat_list <- c("control","early","late")
 
 # read cjs data
-data3 <- read.csv("./output/phi_age0_2016cohort.csv")
+data3 <- read.csv("./output/phi_age0_2016cohort_GC3.csv")
 
 h_df <- tibble(
   estimate = c(),
@@ -262,14 +263,15 @@ for (treat in treat_list) {
 h_df
 ```
 
-## *f*: fertility (number of eggs) 
-2歳での体サイズは2016年コホート（メス）が夏に達成した体サイズ(mm)とする
+## *f*: fertility (number of eggs)
+data: 2915 and 2016 cohorts
+2歳での体サイズは2015年コホートのみのデータを使用  
+3歳では成長クラスターごとに体サイズ（卵数）を計算できないので、成長クラスター分けずに平均の体サイズで計算
 ```{r}
 # read data
 d0 <- read.csv("./input_data/rawdata_filtered.csv")
 gc <- read.csv("./output/k3_data.csv")
 
-# age-1 and age-3
 d1 <- d0 %>% 
   left_join(gc, by="id") %>% 
   mutate(growth_cluster = case_when(ocluster_rename == 1 ~ '1',
@@ -287,31 +289,28 @@ d1 <- d0 %>%
          age != 0, age != 4,
          sex == "female" | sex == "female?")
 
-# age-2
-# use August data
+# check data
+count(d1, age, growth_cluster)
+
+# age-3
 d2 <- d0 %>% 
   left_join(gc, by="id") %>% 
-  mutate(growth_cluster = case_when(ocluster_rename == 1 ~ '1',
-                                    ocluster_rename == 2 ~ '2',
-                                    ocluster_rename == 3 ~ '3',
-                                    TRUE ~ "nd"),
-         fl = as.numeric(fl),
+  mutate(fl = as.numeric(fl),
          age = year - cohort) %>% 
   filter(!grepl("\\?", fl),
          fl != "nd",
-         growth_cluster != "nd",
          treatment == 'control' | treatment == 'early' | treatment == 'late',
-         age == 2,
+         month == 9 | month == 10 | month == 11,
+         matureall == 1,
+         age != 0, age != 4,
          sex == "female" | sex == "female?")
-
-# check data
-count(d1, age, growth_cluster)
-count(d2, age, growth_cluster)
 
 # summarize fork length and egg number for growth cluster
 # sex ratio = 1:1 in eggs
 # eggs(female) = total eggs / 2
-gc_egg1 <- d1 %>% 
+# age-1 and age-2
+gc_egg1 <- d1 %>%
+  filter(age == 1 | age == 2) %>% 
   mutate(egg_num = noegg_fl_1(fl)/2) %>% 
   group_by(age, growth_cluster) %>% 
   summarise(mean = mean(egg_num),
@@ -319,14 +318,16 @@ gc_egg1 <- d1 %>%
             n = n(),
             .groups = "drop") %>% 
   mutate(id = paste0("f", as.character(age), as.character(growth_cluster)))
-gc_egg2 <- d2 %>% 
+# age-3
+gc_egg2 <- d2 %>%
+  filter(age == 3) %>% 
   mutate(egg_num = noegg_fl_1(fl)/2) %>% 
-  group_by(age, growth_cluster) %>% 
+  group_by(age) %>% 
   summarise(mean = mean(egg_num),
             sd = sd(egg_num),
             n = n(),
             .groups = "drop") %>% 
-  mutate(id = paste0("f", as.character(age), as.character(growth_cluster)))
+  mutate(id = paste0("f", as.character(age)))
 
 # make data frame
 f_df1 <- tibble(
@@ -337,7 +338,7 @@ f_df1 <- tibble(
   treatment = "control"
 )
 f_df2 <- tibble(
-  growth = gc_egg2$growth_cluster,
+  growth = "non",
   parameter = gc_egg2$id,
   estimate = gc_egg2$mean,
   sd = gc_egg2$sd,
@@ -353,8 +354,8 @@ f_df
 treat_list <- c("control","early","late")
 
 # read data
-d1<- read.csv("./output/phi_age0_1_oct_2016cohort.csv")
-d2<- read.csv("./output/phi_age1_2_oct_2016cohort.csv")
+d1<- read.csv("./output/phi_age0_1_oct_2016cohort_GC3.csv")
+d2<- read.csv("./output/phi_age1_2_oct_2016cohort_GC3.csv")
 d3<- read.csv("./output/phi_age2_3_age2mature.csv")
 
 u_df <- tibble(
@@ -416,7 +417,7 @@ u_df
 treat_list <- c("control","early","late")
 
 # read data
-d2 <- read.csv("./output/phi_age1_2_oct_2016cohort.csv")
+d2 <- read.csv("./output/phi_age1_2_oct_2016cohort_GC3.csv")
 d3 <- read.csv("./output/phi_age2_3_age2mature.csv")
 
 v_df <- tibble(
@@ -463,15 +464,16 @@ v_df
 ```
 
 ## *m*: prob. of maturation
-1際成熟確率：GLMの結果、ControlとLate処理のデータを統合するモデルのAICが最も高くなったため（差がない）、この2処理は同じ値を使用する  
-2歳成熟、3際成熟は成長クラスターごとに推定できていないため、同じ値を使用する
+1歳成熟確率：GLMの結果、ControlとLate処理のデータを統合するモデルのAICが最も高くなったため（差がない）、この2処理は同じ値を使用する  
+2歳成熟確率：GLMの結果、処理の効果が有意ではなったため、全ての処理では同じ値を使用する  
+3際成熟は成長クラスターごとに推定できていないため、同じ値を使用する
 ```{r}
 
 treat_list <- c("control","early","late")
 
 # age-1 maturity
 ## read data
-d1 <- read.csv("./output/predict_prob_age1maturity.csv")
+d1 <- read.csv("./output/predict_prob_age1maturity_GC3.csv")
 
 m_df <- tibble(
   growth = c(),
@@ -483,7 +485,7 @@ m_df <- tibble(
 
 # control
 dsub <- d1 %>% 
-  filter(treatment == "control,late")
+  filter(treatment == "control")
 m_df_sub <- tibble(
   growth = dsub$growth_cluster,
   parameter = paste0("m0",growth),
@@ -505,7 +507,7 @@ m_df_sub <- tibble(
 m_df <- rbind(m_df,m_df_sub)
 # late
 dsub <- d1 %>% 
-  filter(treatment == "control,late")
+  filter(treatment == "late")
 m_df_sub <- tibble(
   growth = dsub$growth_cluster,
   parameter = paste0("m0",growth),
@@ -517,14 +519,40 @@ m_df <- rbind(m_df,m_df_sub)
 
 # age-2 maturity
 ## read data
-d1 <- read.csv("./output/predict_prob_age2maturity.csv")
+d1 <- read.csv("./output/predict_prob_age2maturity_GC3.csv")
 
+# control
+dsub <- d1 %>% 
+  filter(treatment == "control")
 m_df_sub <- tibble(
-  growth = "non",
-  parameter = "m1",
-  estimate = d1$predicted,
-  sd = d1$sd,
-  treatment = d1$treatment)
+  growth = dsub$growth_cluster,
+  parameter = paste0("m1",growth),
+  estimate = dsub$predicted,
+  sd = dsub$sd,
+  treatment = "control"
+)
+m_df <- rbind(m_df,m_df_sub)
+# early
+dsub <- d1 %>% 
+  filter(treatment == "early")
+m_df_sub <- tibble(
+  growth = dsub$growth_cluster,
+  parameter = paste0("m1",growth),
+  estimate = dsub$predicted,
+  sd = dsub$sd,
+  treatment = "early"
+)
+m_df <- rbind(m_df,m_df_sub)
+# late
+dsub <- d1 %>% 
+  filter(treatment == "late")
+m_df_sub <- tibble(
+  growth = dsub$growth_cluster,
+  parameter = paste0("m1",growth),
+  estimate = dsub$predicted,
+  sd = dsub$sd,
+  treatment = "late"
+)
 m_df <- rbind(m_df,m_df_sub)
 
 # age-3 maturity
@@ -545,10 +573,10 @@ m_df
 
 ```{r}
 # h (hatching): 3
-# f (fertility): 9
+# f (fertility): 7
 # u (juvenile to juvenile survival): 7
 # v (adult to adult survival): 4
-# m (maturation): 5
+# m (maturation): 6
 
 para <- rbind(h_df,f_df,u_df,v_df,m_df)
 
@@ -572,10 +600,10 @@ para_l<- para %>%
 para_list <- tibble(
   parameter = c(
     "h1","h2","h3",
-    "f11","f12","f13","f21","f22","f23","f31","f32","f33",
+    "f11","f12","f13","f21","f22","f23","f3",
     "u01","u02","u03","u11","u12","u13","u2",
     "v11","v12","v13","v2",
-    "m01","m02","m03","m1","m2"
+    "m01","m02","m03","m11","m12","m13","m2"
     )) %>% 
   left_join(para_c, by = "parameter") %>% 
   left_join(para_e, by = "parameter") %>% 

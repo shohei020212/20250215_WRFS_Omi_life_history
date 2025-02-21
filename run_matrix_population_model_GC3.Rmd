@@ -1,0 +1,1015 @@
+---
+title: "Matrix population model for GC-3"
+author: "Shohei Noda"
+date: "2025-02-16"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 5
+    toc_float: TRUE
+    number_section: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+# load package
+library("dplyr")
+library("tidyverse")
+library(Deriv) # シンボリックに微分をやってくれるライブラリ
+require(openxlsx)
+library(ggplot2)
+library("colorRamps")
+library(RColorBrewer)
+library(patchwork)
+
+# plot setting
+color_list = matlab.like(n = 19) # color list
+color_list2 = brewer.pal(5, "Greys") # color list
+line_list = c("solid","dotted","dashed","dotdash") # line type list
+line_list = rep(line_list, 7) # line type list
+
+# plot setting
+theme_set(
+  theme_bw() +
+    theme(title = element_text(size=12, family="sans", face="bold"),
+          axis.title = element_text(size=12, family="sans", face="bold"),
+          axis.text = element_text(size=10, family="sans"),
+          legend.title = element_text(size = 12, family="sans", face="bold"),
+          legend.text = element_text(size = 10, family="sans"),
+          legend.key.size = unit(4, "mm"),
+          legend.position = 'right')
+  )
+
+```
+
+# setup
+インプットデータの修正:  
+処理（Early、Late）で推定できていないパラメータをControlの推定値に統一する。  
+
+```{r}
+# define matrix symbolically
+Mat <- expression(
+  matrix(c(
+    0,0,0,0,0,f11,0,f12,0,f13,0,f21,0,f22,0,f23,f3,f3,f3,
+    h1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    h2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    h3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,u01*(1-m01),0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,u01*m01,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,u02*(1-m02),0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,u02*m02,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,u03*(1-m03),0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,u03*m03,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,u11*(1-m11),0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,u11*m11,v11,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,u12*(1-m12),0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,u12*m12,v12,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,u13*(1-m13),0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,u13*m13,v13,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,u2*m2,v2,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,u2*m2,v2,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,u2*m2,v2,0,0,0
+  ), ncol=19, byrow=T)
+)
+
+# read parameter data
+par.dat <- read.csv("./output/parameters_for_matrix_population_model_with_3GC.csv") 
+
+par.dat2 <- par.dat %>% 
+  mutate(estimate_control = case_when(estimate_control == '-' ~ "0",
+                                    TRUE ~ estimate_control),
+         sd_control = case_when(sd_control == '-' ~ "0",
+                              TRUE ~ sd_control),
+         estimate_early = case_when(estimate_early == '-' ~ estimate_control,
+                                    TRUE ~ estimate_early),
+         sd_early = case_when(sd_early == '-' ~ sd_control,
+                              TRUE ~ sd_early),
+         estimate_late = case_when(estimate_late == '-' ~ estimate_control,
+                                   TRUE ~ estimate_late),
+         sd_late = case_when(sd_late == '-' ~ sd_control,
+                             TRUE ~ sd_late)) %>%
+  mutate(estimate_control = as.numeric(estimate_control),
+         sd_control = as.numeric(sd_control),
+         estimate_early = as.numeric(estimate_early),
+         sd_early = as.numeric(sd_early),
+         estimate_late = as.numeric(estimate_late),
+         sd_late = as.numeric(sd_late))
+
+par.dat2
+
+# get the list of lower level parameters (or related quantities)
+list.parameters <- function(estimates){
+  parameters <- list(
+    h1 = estimates[[1]],
+    h2 = estimates[[2]],
+    h3 = estimates[[3]],
+    f11 = estimates[[4]],
+    f12 = estimates[[5]],
+    f13 = estimates[[6]],
+    f21 = estimates[[7]],
+    f22 = estimates[[8]],
+    f23 = estimates[[9]],
+    f3 = estimates[[10]],
+    u01 = estimates[[11]],
+    u02 = estimates[[12]],
+    u03 = estimates[[13]],
+    u11 = estimates[[14]],
+    u12 = estimates[[15]],
+    u13 = estimates[[16]],
+    u2 = estimates[[17]],
+    v11 = estimates[[18]],
+    v12 = estimates[[19]],
+    v13 = estimates[[20]],
+    v2 = estimates[[21]],
+    m01 = estimates[[22]],
+    m02 = estimates[[23]],
+    m03 = estimates[[24]],
+    m11 = estimates[[25]],
+    m12 = estimates[[26]],
+    m13 = estimates[[27]],
+    m2 = estimates[[28]]
+  )
+  return(parameters)
+}
+
+# function to get values from matrix
+get.matrix <- function(matrix){
+  tibble(
+    par.name = c("h1", "h2", "h3",
+                 "ui01", "um01", "ui02", "um02", "ui03", "um03",
+                 "ui11", "um11", "f11", "v11",
+                 "ui12", "um12", "f12", "v12",
+                 "ui13", "um13", "f13", "v13",
+                 "um21", "f21", "v21",
+                 "um22", "f22", "v22",
+                 "um23", "f23", "v23",
+                 "f31", "f32", "f33"),
+    value = c(matrix[2,1], matrix[3,1], matrix[4,1],
+              matrix[5,2], matrix[6,2], matrix[7,3], matrix[8,3], matrix[9,4], matrix[10,4],
+              matrix[11,5], matrix[12,5], matrix[1,6], matrix[12,6], 
+              matrix[13,7], matrix[14,7], matrix[1,8], matrix[14,8], 
+              matrix[15,9], matrix[16,9], matrix[1,10], matrix[16,10], 
+              matrix[17,11], matrix[1,12], matrix[17,12],
+              matrix[18,13], matrix[1,14], matrix[18,14],
+              matrix[19,15], matrix[1,16], matrix[19,16],
+              matrix[1,17], matrix[1,18], matrix[1,19])
+  )
+}
+
+stage <- c("egg", 
+           "J01", "J02", "J03",
+           "J11", "A11", "J12", "A12", "J13", "A13",
+           "J21", "A21", "J22", "A22", "J23", "A23",
+           "A31", "A32", "A33")
+
+# make max.eigenvalue list
+max_eigenvalues <- tibble(treatment = c(), max_eigenvalue = c())
+
+
+```
+
+## plot parameter values
+```{r}
+
+tmp <- tibble(parameter = par.dat2$parameter, 
+              estimate = par.dat2$estimate_control, 
+              treatment = "control") %>% 
+  rbind(., tibble(parameter = par.dat2$parameter, 
+                  estimate = par.dat2$estimate_early, 
+                  treatment = "early")) %>% 
+  rbind(., tibble(parameter = par.dat2$parameter, 
+                  estimate = par.dat2$estimate_late, 
+                  treatment = "late")) %>% 
+  filter(!(estimate > 1))
+
+ggplot(tmp, aes(x = parameter, y = estimate, fill = treatment)) +
+  geom_bar(stat = "identity", colour = "black", position = position_dodge(width = 0.8)) +
+  labs(x = "parameters", y = "values") +
+  scale_y_continuous(breaks=seq(0,1,0.2), limits = c(0, 1)) +
+  scale_fill_manual('treatment: ', values = c("gray","darkgreen","darkorange")) +
+  coord_flip()
+```
+
+# matrix population modeling
+## control
+```{r}
+# set parameter values
+parameters.control <- list.parameters(par.dat2$estimate_control)
+# make matrix
+Mat.control <- eval(Mat, envir=parameters.control)
+Mat.control
+
+## population dynamics
+# initial condition
+N0 <- numeric(19)
+N0[1] <- 100 # egg = 100 only
+
+years <- 50　# set time
+N.projections <- matrix(0, nrow=nrow(Mat.control), ncol=years+1)　# no.of individual
+N.projections[,1] <- N0 # initial values
+
+# Count the no. of individuals at each time point
+for(i in 1:years) N.projections[,i+1] <- Mat.control %*% N.projections[,i]
+
+# abundance
+## make new data frame
+tmp <- as.data.frame(N.projections)
+rownames(tmp) <- stage
+colnames(tmp) <- seq(1,51,1)
+tmp <- tmp %>% 
+  rownames_to_column(var = "Stage") %>%
+  pivot_longer(
+    cols = -Stage, 
+    names_to = "year", 
+    values_to = "n"
+  ) %>% 
+  mutate(year = as.numeric(year),
+         Stage = factor(Stage, levels = stage))
+
+# bar plot
+ggplot(tmp, aes(x = year, y = n, fill = Stage)) +
+  geom_bar(stat = "identity") +
+  labs(x = "year", y = "abundance") +
+  scale_fill_manual('Stage', values = color_list)
+
+
+# stable stage distribution
+ssd <- N.projections[,years+1]/sum(N.projections[,years+1])
+
+# bar plot
+tmp <- tibble(
+  Stage = stage,
+  proportions = ssd) %>% 
+  mutate(Stage = factor(Stage, levels = stage))
+
+ggplot(tmp, aes(x = Stage, y = proportions)) +
+  geom_bar(stat = "identity", width = 0.9) +
+  labs(x = "stage", y = "proportion") +
+  ylim(c(0,0.1)) +
+  coord_flip()
+
+# eigenvalues
+eigs <- eigen(Mat.control) # eigenvalues and eigenvectors
+eigs
+
+# maximum eigenvalue
+dom.pos <- which.max(Mod(eigs[["values"]])) # 絶対値が最大となる固有値は何番目かを求める（だいたい１つめ）
+lambda.control <- Re(eigs[["values"]][dom.pos])
+lambda.control
+
+# rbind max.eigenvalue
+max_eigenvalues <- rbind(max_eigenvalues, tibble(treatment = "control", max_eigenvalue = lambda.control))
+```
+### Sensitivity analysis
+```{r}
+# right eigenvector
+## stable stage structure
+w <- Re(eigs[["vectors"]][,dom.pos]) # right eigenvector corresponding to max. eigenvalue
+ssd.base <- w/sum(w)　# 固有ベクトルの要素の和が１になるように基準化
+round(ssd.base, 3)
+
+# left eigenvector
+## reproductive value
+left.eigs <- eigen(t(Mat.control)) # 左固有ベクトルを求める（元の行列の転置行列の右固有ベクトル）
+v <- Re(left.eigs[["vectors"]][,dom.pos]) # 最大固有値に対応する左固有ベクトル
+RV.base <- v/v[1] # hatchilingの繁殖価が１になるように基準化
+round(RV.base, 2)
+
+# sensitivity
+vw.s <- v %*% t(w) # 感度の定義（最大固有値に対応する左右の固有ベクトルの要素の積）
+sensitivity <- vw.s/as.numeric(v%*%w)
+round(sensitivity, 2)
+# elasticity
+elasticity <- (Mat.control/lambda.control)*sensitivity # 弾性の定義
+round(elasticity, 2)
+# make data frame
+# add new columns to set label and color
+el.list <- get.matrix(elasticity)
+el.list <- el.list %>% 
+  mutate(color_label = case_when(grepl("^f", par.name) ~ "Reproduction",
+                                 grepl("^v", par.name) ~ "Mature-survival",
+                                 grepl("^um", par.name) ~ "Maturation prob.",
+                                 grepl("^ui", par.name) ~ "Immature-survival",
+                                 grepl("h", par.name) ~ "Egg survival"),
+         color_label = factor(color_label, levels = c("Egg survival", 
+                                                      "Immature-survival", 
+                                                      "Maturation prob.",
+                                                      "Mature-survival",
+                                                      "Reproduction"))) %>% 
+  arrange(desc(color_label),desc(par.name))
+# bar plot
+ggplot(el.list, aes(x = par.name, y = value, fill = color_label)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.7) +
+  labs(x = "parameter", y = "elasticity") +
+  scale_x_discrete(limits = el.list$par.name) +
+  scale_fill_manual('', values = color_list2) +
+  coord_flip()
+
+
+# find the contributions of parameter changes to the lambda change
+dpars <- list() # lambdaの各パラメータに関する感度（最大固有値を各パラメータで微分して評価した結果）を格納するリスト
+for(par.name in names(parameters.control)){
+  dpar <- Deriv(Mat, par.name) # Matの各要素をpar.nameで指定したパラメータで微分
+  dpar.value <- eval(dpar, envir=parameters.control) # 上の微分を評価
+  dpars[[par.name]] <- sum(sensitivity*dpar.value) # d(lambda)/d(par.name)を計算
+}
+# make data frame
+# add new columns to set label and color
+s.list <-  as.data.frame(t(data.frame(dpars))) %>% 
+  rownames_to_column(var = "par.name") %>% 
+  rename(value = V1) %>%  
+  mutate(color_label = case_when(grepl("^f", par.name) ~ "Reproduction",
+                                 grepl("^v", par.name) ~ "Mature-survival",
+                                 grepl("^m", par.name) ~ "Maturation prob.",
+                                 grepl("^u", par.name) ~ "Immature-survival",
+                                 grepl("h", par.name) ~ "Egg survival"),
+         color_label = factor(color_label, levels = c("Egg survival", 
+                                                      "Immature-survival", 
+                                                      "Maturation prob.",
+                                                      "Mature-survival",
+                                                      "Reproduction"))) %>% 
+  arrange(desc(color_label),desc(par.name))
+
+# bar plot
+tmp <- s.list %>% filter(color_label == "Egg survival")
+g1 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Egg survival", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+tmp <- s.list %>% filter(color_label == "Immature-survival")
+g2 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Immature-survival", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+tmp <- s.list %>% filter(color_label == "Maturation prob.")
+g3 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Maturation prob.", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+tmp <- s.list %>% filter(color_label == "Mature-survival")
+g4 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Mature-survival", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+tmp <- s.list %>% filter(color_label == "Reproduction")
+g5 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Reproduction", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+(g1+g2+g3)/(g4+g5)
+```
+
+## early
+```{r}
+# set parameter values
+parameters.early <- list.parameters(par.dat2$estimate_early)
+# make matrix
+Mat.early <- eval(Mat, envir=parameters.early)
+Mat.early
+
+## population dynamics
+# initial condition
+N0 <- numeric(19)
+N0[1] <- 100 # egg = 100 only
+
+years <- 50　# set time
+N.projections <- matrix(0, nrow=nrow(Mat.early), ncol=years+1)　# no.of individual
+N.projections[,1] <- N0 # initial values
+
+# Count the no. of individuals at each time point
+for(i in 1:years) N.projections[,i+1] <- Mat.early %*% N.projections[,i]
+
+# abundance
+## make new data frame
+tmp <- as.data.frame(N.projections)
+rownames(tmp) <- stage
+colnames(tmp) <- seq(1,51,1)
+tmp <- tmp %>% 
+  rownames_to_column(var = "Stage") %>%
+  pivot_longer(
+    cols = -Stage, 
+    names_to = "year", 
+    values_to = "n"
+  ) %>% 
+  mutate(year = as.numeric(year),
+         Stage = factor(Stage, levels = stage))
+
+# bar plot
+ggplot(tmp, aes(x = year, y = n, fill = Stage)) +
+  geom_bar(stat = "identity") +
+  labs(x = "year", y = "abundance") +
+  scale_fill_manual('Stage', values = color_list)
+
+
+# stable stage distribution
+ssd <- N.projections[,years+1]/sum(N.projections[,years+1])
+
+# bar plot
+tmp <- tibble(
+  Stage = stage,
+  proportions = ssd) %>% 
+  mutate(Stage = factor(Stage, levels = stage))
+
+ggplot(tmp, aes(x = Stage, y = proportions)) +
+  geom_bar(stat = "identity", width = 0.9) +
+  labs(x = "stage", y = "proportion") +
+  ylim(c(0,0.1)) +
+  coord_flip()
+
+# eigenvalues
+eigs <- eigen(Mat.early) # eigenvalues and eigenvectors
+eigs
+
+# maximum eigenvalue
+dom.pos <- which.max(Mod(eigs[["values"]])) # 絶対値が最大となる固有値は何番目かを求める（だいたい１つめ）
+lambda.early <- Re(eigs[["values"]][dom.pos])
+lambda.early
+
+# rbind max.eigenvalue
+max_eigenvalues <- rbind(max_eigenvalues, tibble(treatment = "early", max_eigenvalue = lambda.early))
+```
+### Sensitivity analysis
+```{r}
+# right eigenvector
+## stable stage structure
+w <- Re(eigs[["vectors"]][,dom.pos]) # right eigenvector corresponding to max. eigenvalue
+ssd.base <- w/sum(w)　# 固有ベクトルの要素の和が１になるように基準化
+round(ssd.base, 3)
+
+# left eigenvector
+## reproductive value
+left.eigs <- eigen(t(Mat.early)) # 左固有ベクトルを求める（元の行列の転置行列の右固有ベクトル）
+v <- Re(left.eigs[["vectors"]][,dom.pos]) # 最大固有値に対応する左固有ベクトル
+RV.base <- v/v[1] # hatchilingの繁殖価が１になるように基準化
+round(RV.base, 2)
+
+# sensitivity
+vw.s <- v %*% t(w) # 感度の定義（最大固有値に対応する左右の固有ベクトルの要素の積）
+sensitivity <- vw.s/as.numeric(v%*%w)
+round(sensitivity, 2)
+# elasticity
+elasticity <- (Mat.early/lambda.early)*sensitivity # 弾性の定義
+round(elasticity, 2)
+# make data frame
+# add new columns to set label and color
+el.list <- get.matrix(elasticity)
+el.list <- el.list %>% 
+  mutate(color_label = case_when(grepl("^f", par.name) ~ "Reproduction",
+                                 grepl("^v", par.name) ~ "Mature-survival",
+                                 grepl("^um", par.name) ~ "Maturation prob.",
+                                 grepl("^ui", par.name) ~ "Immature-survival",
+                                 grepl("h", par.name) ~ "Egg survival"),
+         color_label = factor(color_label, levels = c("Egg survival", 
+                                                      "Immature-survival", 
+                                                      "Maturation prob.",
+                                                      "Mature-survival",
+                                                      "Reproduction"))) %>% 
+  arrange(desc(color_label),desc(par.name))
+# bar plot
+ggplot(el.list, aes(x = par.name, y = value, fill = color_label)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.7) +
+  labs(x = "parameter", y = "elasticity") +
+  scale_x_discrete(limits = el.list$par.name) +
+  scale_fill_manual('', values = color_list2) +
+  coord_flip()
+
+
+# find the contributions of parameter changes to the lambda change
+dpars <- list() # lambdaの各パラメータに関する感度（最大固有値を各パラメータで微分して評価した結果）を格納するリスト
+for(par.name in names(parameters.early)){
+  dpar <- Deriv(Mat, par.name) # Matの各要素をpar.nameで指定したパラメータで微分
+  dpar.value <- eval(dpar, envir=parameters.early) # 上の微分を評価
+  dpars[[par.name]] <- sum(sensitivity*dpar.value) # d(lambda)/d(par.name)を計算
+}
+# make data frame
+# add new columns to set label and color
+s.list <-  as.data.frame(t(data.frame(dpars))) %>% 
+  rownames_to_column(var = "par.name") %>% 
+  rename(value = V1) %>%  
+  mutate(color_label = case_when(grepl("^f", par.name) ~ "Reproduction",
+                                 grepl("^v", par.name) ~ "Mature-survival",
+                                 grepl("^m", par.name) ~ "Maturation prob.",
+                                 grepl("^u", par.name) ~ "Immature-survival",
+                                 grepl("h", par.name) ~ "Egg survival"),
+         color_label = factor(color_label, levels = c("Egg survival", 
+                                                      "Immature-survival", 
+                                                      "Maturation prob.",
+                                                      "Mature-survival",
+                                                      "Reproduction"))) %>% 
+  arrange(desc(color_label),desc(par.name))
+
+# bar plot
+tmp <- s.list %>% filter(color_label == "Egg survival")
+g1 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Egg survival", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+tmp <- s.list %>% filter(color_label == "Immature-survival")
+g2 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Immature-survival", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+tmp <- s.list %>% filter(color_label == "Maturation prob.")
+g3 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Maturation prob.", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+tmp <- s.list %>% filter(color_label == "Mature-survival")
+g4 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Mature-survival", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+tmp <- s.list %>% filter(color_label == "Reproduction")
+g5 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Reproduction", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+(g1+g2+g3)/(g4+g5)
+```
+
+## late
+```{r}
+# set parameter values
+parameters.late <- list.parameters(par.dat2$estimate_late)
+# make matrix
+Mat.late <- eval(Mat, envir=parameters.late)
+Mat.late
+
+## population dynamics
+# initial condition
+N0 <- numeric(19)
+N0[1] <- 100 # egg = 100 only
+
+years <- 50　# set time
+N.projections <- matrix(0, nrow=nrow(Mat.late), ncol=years+1)　# no.of individual
+N.projections[,1] <- N0 # initial values
+
+# Count the no. of individuals at each time point
+for(i in 1:years) N.projections[,i+1] <- Mat.late %*% N.projections[,i]
+
+# abundance
+## make new data frame
+tmp <- as.data.frame(N.projections)
+rownames(tmp) <- stage
+colnames(tmp) <- seq(1,51,1)
+tmp <- tmp %>% 
+  rownames_to_column(var = "Stage") %>%
+  pivot_longer(
+    cols = -Stage, 
+    names_to = "year", 
+    values_to = "n"
+  ) %>% 
+  mutate(year = as.numeric(year),
+         Stage = factor(Stage, levels = stage))
+
+# bar plot
+ggplot(tmp, aes(x = year, y = n, fill = Stage)) +
+  geom_bar(stat = "identity") +
+  labs(x = "year", y = "abundance") +
+  scale_fill_manual('Stage', values = color_list)
+
+
+# stable stage distribution
+ssd <- N.projections[,years+1]/sum(N.projections[,years+1])
+
+# bar plot
+tmp <- tibble(
+  Stage = stage,
+  proportions = ssd) %>% 
+  mutate(Stage = factor(Stage, levels = stage))
+
+ggplot(tmp, aes(x = Stage, y = proportions)) +
+  geom_bar(stat = "identity", width = 0.9) +
+  labs(x = "stage", y = "proportion") +
+  ylim(c(0,0.1)) +
+  coord_flip()
+
+# eigenvalues
+eigs <- eigen(Mat.late) # eigenvalues and eigenvectors
+eigs
+
+# maximum eigenvalue
+dom.pos <- which.max(Mod(eigs[["values"]])) # 絶対値が最大となる固有値は何番目かを求める（だいたい１つめ）
+lambda.late <- Re(eigs[["values"]][dom.pos])
+lambda.late
+
+# rbind max.eigenvalue
+max_eigenvalues <- rbind(max_eigenvalues, tibble(treatment = "late", max_eigenvalue = lambda.late))
+```
+### Sensitivity analysis
+```{r}
+# right eigenvector
+## stable stage structure
+w <- Re(eigs[["vectors"]][,dom.pos]) # right eigenvector corresponding to max. eigenvalue
+ssd.base <- w/sum(w)　# 固有ベクトルの要素の和が１になるように基準化
+round(ssd.base, 3)
+
+# left eigenvector
+## reproductive value
+left.eigs <- eigen(t(Mat.late)) # 左固有ベクトルを求める（元の行列の転置行列の右固有ベクトル）
+v <- Re(left.eigs[["vectors"]][,dom.pos]) # 最大固有値に対応する左固有ベクトル
+RV.base <- v/v[1] # hatchilingの繁殖価が１になるように基準化
+round(RV.base, 2)
+
+# sensitivity
+vw.s <- v %*% t(w) # 感度の定義（最大固有値に対応する左右の固有ベクトルの要素の積）
+sensitivity <- vw.s/as.numeric(v%*%w)
+round(sensitivity, 2)
+# elasticity
+elasticity <- (Mat.late/lambda.late)*sensitivity # 弾性の定義
+round(elasticity, 2)
+# make data frame
+# add new columns to set label and color
+el.list <- get.matrix(elasticity)
+el.list <- el.list %>% 
+  mutate(color_label = case_when(grepl("^f", par.name) ~ "Reproduction",
+                                 grepl("^v", par.name) ~ "Mature-survival",
+                                 grepl("^um", par.name) ~ "Maturation prob.",
+                                 grepl("^ui", par.name) ~ "Immature-survival",
+                                 grepl("h", par.name) ~ "Egg survival"),
+         color_label = factor(color_label, levels = c("Egg survival", 
+                                                      "Immature-survival", 
+                                                      "Maturation prob.",
+                                                      "Mature-survival",
+                                                      "Reproduction"))) %>% 
+  arrange(desc(color_label),desc(par.name))
+# bar plot
+ggplot(el.list, aes(x = par.name, y = value, fill = color_label)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.7) +
+  labs(x = "parameter", y = "elasticity") +
+  scale_x_discrete(limits = el.list$par.name) +
+  scale_fill_manual('', values = color_list2) +
+  coord_flip()
+
+
+# find the contributions of parameter changes to the lambda change
+dpars <- list() # lambdaの各パラメータに関する感度（最大固有値を各パラメータで微分して評価した結果）を格納するリスト
+for(par.name in names(parameters.late)){
+  dpar <- Deriv(Mat, par.name) # Matの各要素をpar.nameで指定したパラメータで微分
+  dpar.value <- eval(dpar, envir=parameters.late) # 上の微分を評価
+  dpars[[par.name]] <- sum(sensitivity*dpar.value) # d(lambda)/d(par.name)を計算
+}
+# make data frame
+# add new columns to set label and color
+s.list <-  as.data.frame(t(data.frame(dpars))) %>% 
+  rownames_to_column(var = "par.name") %>% 
+  rename(value = V1) %>%  
+  mutate(color_label = case_when(grepl("^f", par.name) ~ "Reproduction",
+                                 grepl("^v", par.name) ~ "Mature-survival",
+                                 grepl("^m", par.name) ~ "Maturation prob.",
+                                 grepl("^u", par.name) ~ "Immature-survival",
+                                 grepl("h", par.name) ~ "Egg survival"),
+         color_label = factor(color_label, levels = c("Egg survival", 
+                                                      "Immature-survival", 
+                                                      "Maturation prob.",
+                                                      "Mature-survival",
+                                                      "Reproduction"))) %>% 
+  arrange(desc(color_label),desc(par.name))
+
+# bar plot
+tmp <- s.list %>% filter(color_label == "Egg survival")
+g1 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Egg survival", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+tmp <- s.list %>% filter(color_label == "Immature-survival")
+g2 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Immature-survival", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+tmp <- s.list %>% filter(color_label == "Maturation prob.")
+g3 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Maturation prob.", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+tmp <- s.list %>% filter(color_label == "Mature-survival")
+g4 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Mature-survival", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+tmp <- s.list %>% filter(color_label == "Reproduction")
+g5 <- ggplot(tmp, aes(x = par.name, y = value)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "Reproduction", x = "", y = "") +
+  coord_flip() +
+  theme(axis.title = element_blank())
+(g1+g2+g3)/(g4+g5)
+```
+
+# Maximum eigenvalue
+```{r}
+max_eigenvalues
+```
+
+# LTRE analysis
+## early vs control
+```{r}
+# mean
+estimate_mean <- (par.dat2$estimate_early + par.dat2$estimate_control)/2
+parameters.mean <- list.parameters(estimate_mean)
+# difference
+estimate_diff <- par.dat2$estimate_early - par.dat2$estimate_control
+parameters.diff <- list.parameters(estimate_diff)
+
+Mat.mean <- eval(Mat, envir=parameters.mean)
+
+# find the sensitivity of Mat.mean
+## right eigenvector
+eigs <- eigen(Mat.mean)
+dom.pos <- which.max(Mod(eigs[["values"]]))
+w <- Re(eigs[["vectors"]][,dom.pos]) # 最大固有値に対応する右固有ベクトル
+## left eigenvector
+eigs.left <- eigen(t(Mat.mean))　# 左固有ベクトルを求める（元の行列の転置行列の右固有ベクトル）
+v <- Re(eigs.left[["vectors"]][,dom.pos])　# 最大固有値に対応する左固有ベクトル
+
+# sensitivity
+vw.s <- v %*% t(w)
+sensitivity.mean <- vw.s/as.numeric(v%*%w)
+round(sensitivity.mean, 2)
+
+# find the contributions of parameter changes to the lambda change
+## lambdaの各パラメータの感度（最大固有値を各パラメータで微分しparameters.meanで評価）を格納するリスト
+dpars <- list()
+## 各パラメータの最大固有値の違いへの貢献度を格納するリスト
+contributions <- list()
+for(par.name in names(parameters.mean)){
+  dpar <- Deriv(Mat, par.name) # Matの各要素をpar.nameで指定したパラメータで微分
+  dpar.mean <- eval(dpar, envir=parameters.mean) # 上の微分をparameters.meanで評価
+  dpars[[par.name]] <- sum(sensitivity.mean*dpar.mean) # d(lambda)/d(par.name)を計算
+  contributions[[par.name]] <- parameters.diff[[par.name]]*dpars[[par.name]]
+}
+
+# 結果の確認
+## 貢献度の合計値
+sum(unlist(contributions))
+## 行列の差
+lambda.early - lambda.control
+
+# make data frame
+tmp1 <-  as.data.frame(t(data.frame(parameters.diff))) %>% 
+  rownames_to_column(var = "par.name") %>% 
+  rename(par.diff = V1)
+tmp2 <-  as.data.frame(t(data.frame(dpars))) %>% 
+  rownames_to_column(var = "par.name") %>% 
+  rename(sensitivity = V1)
+tmp3 <-  as.data.frame(t(data.frame(contributions))) %>% 
+  rownames_to_column(var = "par.name") %>% 
+  rename(contribution = V1)
+tmp <- tmp1 %>% 
+  left_join(tmp2, by = "par.name") %>% 
+  left_join(tmp3, by = "par.name") %>% 
+  mutate(color_label = case_when(grepl("^f", par.name) ~ "Reproduction",
+                                 grepl("^v", par.name) ~ "Mature-survival",
+                                 grepl("^m", par.name) ~ "Maturation prob.",
+                                 grepl("^u", par.name) ~ "Immature-survival",
+                                 grepl("h", par.name) ~ "Egg survival"),
+         color_label = factor(color_label, levels = c("Egg survival", 
+                                                      "Immature-survival", 
+                                                      "Maturation prob.",
+                                                      "Mature-survival",
+                                                      "Reproduction"))) %>% 
+  arrange(color_label,par.name)
+
+# plot
+g1 <- ggplot(tmp, aes(x = par.name, y = par.diff, fill = color_label)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "(a) parameter difference") +
+  scale_x_discrete(limits = tmp$par.name) +
+  scale_fill_manual('', values = color_list2) +
+  theme(axis.title = element_blank(),
+        axis.text.x = element_blank(),
+        legend.position = 'right')
+g2 <- ggplot(tmp, aes(x = par.name, y = sensitivity, fill = color_label)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "(b) sensitivity") +
+  scale_x_discrete(limits = tmp$par.name) +
+  scale_fill_manual('', values = color_list2) +
+  theme(axis.title = element_blank(),
+        axis.text.x = element_blank(),
+        legend.position = 'none')
+g3 <- ggplot(tmp, aes(x = par.name, y = contribution, fill = color_label)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "(c) contribution") +
+  scale_x_discrete(limits = tmp$par.name) +
+  scale_fill_manual('', values = color_list2) +
+  theme(axis.title = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        legend.position = 'none')
+
+# plot all
+g1/g2/g3 + plot_annotation(title = "LTRE: early vs control", caption = "")
+```
+
+## late vs control
+```{r}
+# mean
+estimate_mean <- (par.dat2$estimate_late + par.dat2$estimate_control)/2
+parameters.mean <- list.parameters(estimate_mean)
+# difference
+estimate_diff <- par.dat2$estimate_late - par.dat2$estimate_control
+parameters.diff <- list.parameters(estimate_diff)
+
+Mat.mean <- eval(Mat, envir=parameters.mean)
+
+# find the sensitivity of Mat.mean
+## right eigenvector
+eigs <- eigen(Mat.mean)
+dom.pos <- which.max(Mod(eigs[["values"]]))
+w <- Re(eigs[["vectors"]][,dom.pos]) # 最大固有値に対応する右固有ベクトル
+## left eigenvector
+eigs.left <- eigen(t(Mat.mean))　# 左固有ベクトルを求める（元の行列の転置行列の右固有ベクトル）
+v <- Re(eigs.left[["vectors"]][,dom.pos])　# 最大固有値に対応する左固有ベクトル
+
+# sensitivity
+vw.s <- v %*% t(w)
+sensitivity.mean <- vw.s/as.numeric(v%*%w)
+round(sensitivity.mean, 2)
+
+# find the contributions of parameter changes to the lambda change
+## lambdaの各パラメータの感度（最大固有値を各パラメータで微分しparameters.meanで評価）を格納するリスト
+dpars <- list()
+## 各パラメータの最大固有値の違いへの貢献度を格納するリスト
+contributions <- list()
+for(par.name in names(parameters.mean)){
+  dpar <- Deriv(Mat, par.name) # Matの各要素をpar.nameで指定したパラメータで微分
+  dpar.mean <- eval(dpar, envir=parameters.mean) # 上の微分をparameters.meanで評価
+  dpars[[par.name]] <- sum(sensitivity.mean*dpar.mean) # d(lambda)/d(par.name)を計算
+  contributions[[par.name]] <- parameters.diff[[par.name]]*dpars[[par.name]]
+}
+
+# 結果の確認
+## 貢献度の合計値
+sum(unlist(contributions))
+## 行列の差
+lambda.late - lambda.control
+
+# make data frame
+tmp1 <-  as.data.frame(t(data.frame(parameters.diff))) %>% 
+  rownames_to_column(var = "par.name") %>% 
+  rename(par.diff = V1)
+tmp2 <-  as.data.frame(t(data.frame(dpars))) %>% 
+  rownames_to_column(var = "par.name") %>% 
+  rename(sensitivity = V1)
+tmp3 <-  as.data.frame(t(data.frame(contributions))) %>% 
+  rownames_to_column(var = "par.name") %>% 
+  rename(contribution = V1)
+tmp <- tmp1 %>% 
+  left_join(tmp2, by = "par.name") %>% 
+  left_join(tmp3, by = "par.name") %>% 
+  mutate(color_label = case_when(grepl("^f", par.name) ~ "Reproduction",
+                                 grepl("^v", par.name) ~ "Mature-survival",
+                                 grepl("^m", par.name) ~ "Maturation prob.",
+                                 grepl("^u", par.name) ~ "Immature-survival",
+                                 grepl("h", par.name) ~ "Egg survival"),
+         color_label = factor(color_label, levels = c("Egg survival", 
+                                                      "Immature-survival", 
+                                                      "Maturation prob.",
+                                                      "Mature-survival",
+                                                      "Reproduction"))) %>% 
+  arrange(color_label,par.name)
+
+# plot
+g1 <- ggplot(tmp, aes(x = par.name, y = par.diff, fill = color_label)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "(a) parameter difference") +
+  scale_x_discrete(limits = tmp$par.name) +
+  scale_fill_manual('', values = color_list2) +
+  theme(axis.title = element_blank(),
+        axis.text.x = element_blank(),
+        legend.position = 'right')
+g2 <- ggplot(tmp, aes(x = par.name, y = sensitivity, fill = color_label)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "(b) sensitivity") +
+  scale_x_discrete(limits = tmp$par.name) +
+  scale_fill_manual('', values = color_list2) +
+  theme(axis.title = element_blank(),
+        axis.text.x = element_blank(),
+        legend.position = 'none')
+g3 <- ggplot(tmp, aes(x = par.name, y = contribution, fill = color_label)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "(c) contribution") +
+  scale_x_discrete(limits = tmp$par.name) +
+  scale_fill_manual('', values = color_list2) +
+  theme(axis.title = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        legend.position = 'none')
+
+# plot all
+g1/g2/g3 + plot_annotation(title = "LTRE: late vs control", caption = "")
+```
+
+## early vs late
+```{r}
+# mean
+estimate_mean <- (par.dat2$estimate_early + par.dat2$estimate_late)/2
+parameters.mean <- list.parameters(estimate_mean)
+# difference
+estimate_diff <- par.dat2$estimate_early - par.dat2$estimate_late
+parameters.diff <- list.parameters(estimate_diff)
+
+Mat.mean <- eval(Mat, envir=parameters.mean)
+
+# find the sensitivity of Mat.mean
+## right eigenvector
+eigs <- eigen(Mat.mean)
+dom.pos <- which.max(Mod(eigs[["values"]]))
+w <- Re(eigs[["vectors"]][,dom.pos]) # 最大固有値に対応する右固有ベクトル
+## left eigenvector
+eigs.left <- eigen(t(Mat.mean))　# 左固有ベクトルを求める（元の行列の転置行列の右固有ベクトル）
+v <- Re(eigs.left[["vectors"]][,dom.pos])　# 最大固有値に対応する左固有ベクトル
+
+# sensitivity
+vw.s <- v %*% t(w)
+sensitivity.mean <- vw.s/as.numeric(v%*%w)
+round(sensitivity.mean, 2)
+
+# find the contributions of parameter changes to the lambda change
+## lambdaの各パラメータの感度（最大固有値を各パラメータで微分しparameters.meanで評価）を格納するリスト
+dpars <- list()
+## 各パラメータの最大固有値の違いへの貢献度を格納するリスト
+contributions <- list()
+for(par.name in names(parameters.mean)){
+  dpar <- Deriv(Mat, par.name) # Matの各要素をpar.nameで指定したパラメータで微分
+  dpar.mean <- eval(dpar, envir=parameters.mean) # 上の微分をparameters.meanで評価
+  dpars[[par.name]] <- sum(sensitivity.mean*dpar.mean) # d(lambda)/d(par.name)を計算
+  contributions[[par.name]] <- parameters.diff[[par.name]]*dpars[[par.name]]
+}
+
+# 結果の確認
+## 貢献度の合計値
+sum(unlist(contributions))
+## 行列の差
+lambda.early - lambda.late
+
+# make data frame
+tmp1 <-  as.data.frame(t(data.frame(parameters.diff))) %>% 
+  rownames_to_column(var = "par.name") %>% 
+  rename(par.diff = V1)
+tmp2 <-  as.data.frame(t(data.frame(dpars))) %>% 
+  rownames_to_column(var = "par.name") %>% 
+  rename(sensitivity = V1)
+tmp3 <-  as.data.frame(t(data.frame(contributions))) %>% 
+  rownames_to_column(var = "par.name") %>% 
+  rename(contribution = V1)
+tmp <- tmp1 %>% 
+  left_join(tmp2, by = "par.name") %>% 
+  left_join(tmp3, by = "par.name") %>% 
+  mutate(color_label = case_when(grepl("^f", par.name) ~ "Reproduction",
+                                 grepl("^v", par.name) ~ "Mature-survival",
+                                 grepl("^m", par.name) ~ "Maturation prob.",
+                                 grepl("^u", par.name) ~ "Immature-survival",
+                                 grepl("h", par.name) ~ "Egg survival"),
+         color_label = factor(color_label, levels = c("Egg survival", 
+                                                      "Immature-survival", 
+                                                      "Maturation prob.",
+                                                      "Mature-survival",
+                                                      "Reproduction"))) %>% 
+  arrange(color_label,par.name)
+
+# plot
+g1 <- ggplot(tmp, aes(x = par.name, y = par.diff, fill = color_label)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "(a) parameter difference") +
+  scale_x_discrete(limits = tmp$par.name) +
+  scale_fill_manual('', values = color_list2) +
+  theme(axis.title = element_blank(),
+        axis.text.x = element_blank(),
+        legend.position = 'right')
+g2 <- ggplot(tmp, aes(x = par.name, y = sensitivity, fill = color_label)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "(b) sensitivity") +
+  scale_x_discrete(limits = tmp$par.name) +
+  scale_fill_manual('', values = color_list2) +
+  theme(axis.title = element_blank(),
+        axis.text.x = element_blank(),
+        legend.position = 'none')
+g3 <- ggplot(tmp, aes(x = par.name, y = contribution, fill = color_label)) +
+  geom_bar(stat = "identity", colour = "black", width = 0.8) +
+  labs(title = "(c) contribution") +
+  scale_x_discrete(limits = tmp$par.name) +
+  scale_fill_manual('', values = color_list2) +
+  theme(axis.title = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        legend.position = 'none')
+
+# plot all
+g1/g2/g3 + plot_annotation(title = "LTRE: early vs late", caption = "")
+```
+

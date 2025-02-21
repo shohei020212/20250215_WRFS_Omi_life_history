@@ -1,0 +1,370 @@
+---
+title: "statistical analysis - prob. of maturation"
+author: "Shohei Noda"
+date: "2025-02-16"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 5
+    toc_float: TRUE
+    number_section: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+
+# load package
+library("dplyr")
+library(lme4)
+library(MuMIn)
+options(na.action = "na.fail")
+library(partitions)
+library(ggeffects)
+require(ggplot2)
+library(RColorBrewer)
+
+# plot setting
+theme_set(
+  theme_bw() +
+    theme(title = element_text(size=20, family="sans", face="bold"),
+          axis.title = element_text(size=20, family="sans", face="bold"),
+          axis.text = element_text(size=15, family="sans"),
+          strip.text=element_text(size=20, family="sans", face="bold"),
+          strip.background = element_rect(color="black", fill="white",
+                                          linewidth=0.6, linetype="solid"),
+          panel.background = element_rect("white"),
+          legend.title = element_text(size = 15, family="sans", face="bold"),
+          legend.text = element_text(size = 15, family="sans"),
+          legend.position = 'none')
+  )
+
+```
+
+# prepare input data
+```{r}
+# read raw data
+idlist <- read.csv("./input_data/id_list.csv")
+gc <- read.csv("./output/k3_data.csv")
+
+
+## id list
+# filtering
+d1 <- idlist %>% 
+  left_join(gc, by="id") %>% 
+  mutate(early_mature = case_when(age_at_mature == "0" ~ "1",
+                                  age_at_mature == "1" ~ "1",
+                                  age_at_mature == "2" ~ "0",
+                                  age_at_mature == "3" ~ "0",
+                                  age_at_mature == ">1" ~ "0",
+                                  age_at_mature == ">2" ~ "0",
+                                  age_at_mature == ">3" ~ "0",
+                                  TRUE ~ "nd")) %>% 
+  filter(treatment == 'early' | treatment == 'late' | treatment == 'control') %>% 
+  mutate(treatment = factor(treatment, levels = c("early", "late", "control")),
+         growth_cluster = as.factor(ocluster_rename))
+```
+
+# GLM: age-1 maturity ~ GC + TR
+
+data: 2016-cohort  
+GC = growth cluster(1,2,3)  
+TR = treatment(control, early, late)
+
+## edit data
+```{r}
+# edit data
+data <- d1 %>% 
+  filter(age1_mature == 0 | age1_mature == 1,
+         growth_cluster != "nd",
+         cohort == 2016) %>% 
+  mutate(treatment = factor(treatment, levels = c("control", "early", "late")))
+
+count(data,age1_mature, growth_cluster, treatment)
+```
+
+## model selection
+```{r}
+full.model <- glm(age1_mature ~ growth_cluster + treatment, 
+              data=data, 
+              family=binomial(link="logit"))
+summary(full.model)
+
+model.list <- dredge(full.model, rank="AIC")
+model.list
+```
+```{r}
+# partition
+indata <- data %>% 
+  mutate(subgr = case_when(treatment == "control" ~ 1,
+                           treatment == "early" ~ 2,
+                           treatment == "late" ~ 3),
+  subgr = as.factor(subgr),
+  y = as.numeric(age1_mature),
+  x = as.factor(growth_cluster))
+
+# check combination
+listParts(length(unique(indata$subgr)))
+level <- levels(indata$subgr)
+
+glm4apartition <- function(partno) {
+  apartition <- setparts(length(level))[, partno]
+  indata %>%
+    mutate(subgr = as.factor(apartition[subgr])) -> tmp
+  list(partition = partno,
+       model = glm(y ~ subgr + x,
+                   family = binomial(link="logit"),
+                   data = tmp))}
+
+subsets <- listParts(length(level))
+partseq <- 2:length(subsets)
+result <- purrr::map(partseq, glm4apartition)
+
+# Best model
+bestresult <- result[[which.min(purrr::map(result, function(ap) ap$model$aic))]]
+best_subset <- subsets[bestresult$partition]
+bestmodel <- bestresult$model
+summary(bestmodel)
+
+sorted_indices <- order(purrr::map_dbl(result, ~.x$model$aic))
+
+# Second model
+second_result <- result[[sorted_indices[2]]]
+second_subset <- subsets[second_result$partition]
+second_model <- second_result$model
+
+# AIC
+null <- glm(y ~ subgr + x,
+            family = binomial(link="logit"),
+            data = indata)
+est = c(AIC(null, bestmodel, second_model)$AIC)
+models_data_sub <- data.frame(
+  "lank" = c("NULL",
+             "1",
+             "2"),
+  "group" = c("NULL", as.character(best_subset), as.character(second_subset)),
+  "model" = "growth_cluster+treatment",
+  "AIC" = c(est),
+  "deltaAIC" = AIC(bestmodel)-c(AIC(null, bestmodel, second_model)$AIC)
+)
+models_data_sub
+```
+```{r}
+# Best cluster: control + late vs early
+# edit data
+data <- d1 %>% 
+  filter(age1_mature == 0 | age1_mature == 1,
+         growth_cluster != "nd",
+         cohort == 2016) %>% 
+  mutate(treatment2 = case_when(treatment == "control" ~ "control,late",
+                                treatment == "late" ~ "control,late",
+                                TRUE ~ "early"),
+         treatment2 = factor(treatment2, levels = c("control,late", "early")))
+
+count(data,age1_mature, growth_cluster, treatment2)
+
+model <- glm(age1_mature ~ growth_cluster + treatment2,
+             data=data,
+             family=binomial(link="logit"))
+summary(model)
+
+```
+## plot
+```{r}
+# setting
+color_list = brewer.pal(7, "RdYlGn")
+cols = c("#4D9221","#FC8D59","gray45")
+
+# prediction
+preds <- ggpredict(full.model, terms = c("growth_cluster","treatment"), ci_level = 0.95, interval = "confidence")
+
+# plot prediction
+preds <- tibble(
+  growth_cluster = as.numeric(preds$x),
+  treatment = as.character(preds$group),
+  predicted = preds$predicted,
+  sd = preds$std.error,
+  conf.low = preds$conf.low,
+  conf.high = preds$conf.high
+)
+
+# convert as numeric
+data$growth_cluster2 <- as.numeric(data$growth_cluster)
+
+ggplot(NULL) +
+  geom_jitter(data = data, aes(x = growth_cluster2, y = age1_mature, colour = treatment), 
+              size = 4, height=0, width = 0.3, alpha=0.3) +
+  # prediction
+  geom_errorbar(data = preds, 
+                aes(x = growth_cluster, y = predicted, 
+                    ymin = conf.low, ymax = conf.high,
+                    colour = treatment),
+                width = 0, linewidth = 1.5, position = position_dodge(0.5)) +
+  geom_point(data = preds, aes(x = growth_cluster, y = predicted, colour = treatment),
+             size = 5, position = position_dodge(0.5)) +
+  scale_color_manual('treatment: ', values = cols) +
+  scale_x_continuous(limits = c(0.5, 3.5), breaks=seq(0,4,1)) +
+  scale_y_continuous(breaks=seq(0,1.5,0.5)) +
+  labs(x = "Growth cluster", y = "Prob. of maturation") +
+  theme(legend.position = 'top')
+
+# save to csv
+write.csv(preds, "./output/predict_prob_age1maturity_GC3.csv")
+```
+
+# GLM: age-2 maturity ~ GC + TR
+
+data: 2015-cohort  
+GC = growth cluster(1,2,3)  
+TR = treatment(control, early, late)
+
+## edit data
+```{r}
+# edit data
+data <- d1 %>% 
+  filter(age2_mature == 0 | age2_mature == 1,
+         growth_cluster != "nd",
+         cohort == 2015) %>% 
+  mutate(treatment = factor(treatment, levels = c("control", "early", "late")),
+         growth_cluster = as.numeric(growth_cluster))
+
+count(data, age2_mature, cohort, growth_cluster, treatment)
+```
+
+## model selection
+```{r}
+
+full.model <- glm(age2_mature ~ growth_cluster + treatment, 
+             data=data, 
+             family=binomial(link="logit"))
+summary(full.model)
+
+model.list <- dredge(full.model, rank="AIC")
+model.list
+```
+
+```{r}
+# partition
+indata <- data %>% 
+  mutate(subgr = case_when(treatment == "control" ~ 1,
+                           treatment == "early" ~ 2,
+                           treatment == "late" ~ 3),
+  subgr = as.factor(subgr),
+  y = as.numeric(age2_mature),
+  x = as.numeric(growth_cluster))
+
+# check combination
+listParts(length(unique(indata$subgr)))
+level <- levels(indata$subgr)
+
+glm4apartition <- function(partno) {
+  apartition <- setparts(length(level))[, partno]
+  indata %>%
+    mutate(subgr = as.factor(apartition[subgr])) -> tmp
+  list(partition = partno,
+       model = glm(y ~ subgr + x,
+                   family = binomial(link="logit"),
+                   data = tmp))}
+
+subsets <- listParts(length(level))
+partseq <- 2:length(subsets)
+result <- purrr::map(partseq, glm4apartition)
+
+# Best model
+bestresult <- result[[which.min(purrr::map(result, function(ap) ap$model$aic))]]
+best_subset <- subsets[bestresult$partition]
+bestmodel <- bestresult$model
+summary(bestmodel)
+
+sorted_indices <- order(purrr::map_dbl(result, ~.x$model$aic))
+
+# Second model
+second_result <- result[[sorted_indices[2]]]
+second_subset <- subsets[second_result$partition]
+second_model <- second_result$model
+
+# AIC
+null <- glm(y ~ subgr + x,
+            family = binomial(link="logit"),
+            data = indata)
+est = c(AIC(null, bestmodel, second_model)$AIC)
+models_data_sub <- data.frame(
+  "lank" = c("NULL",
+             "1",
+             "2"),
+  "group" = c("NULL", as.character(best_subset), as.character(second_subset)),
+  "model" = "growth_cluster+treatment",
+  "AIC" = c(est),
+  "deltaAIC" = AIC(bestmodel)-c(AIC(null, bestmodel, second_model)$AIC)
+)
+models_data_sub
+```
+```{r}
+# Best cluster: control + late vs early
+# edit data
+data <- d1 %>% 
+  filter(age2_mature == 0 | age2_mature == 1,
+         growth_cluster != "nd",
+         cohort == 2015) %>% 
+  mutate(treatment2 = case_when(treatment == "control" ~ "control,late",
+                                treatment == "late" ~ "control,late",
+                                TRUE ~ "early"),
+         treatment2 = factor(treatment2, levels = c("control,late", "early")),
+         growth_cluster = as.numeric(growth_cluster))
+
+count(data,age2_mature, growth_cluster, treatment2)
+
+model <- glm(age2_mature ~ growth_cluster + treatment2,
+             data=data,
+             family=binomial(link="logit"))
+summary(model)
+
+```
+
+## plot
+
+```{r}
+# setting
+color_list = brewer.pal(7, "RdYlGn")
+cols = c("#4D9221","#FC8D59","gray45")
+
+# prediction
+preds <- ggpredict(full.model, terms = c("growth_cluster","treatment"), ci_level = 0.95, interval = "confidence")
+
+# plot prediction
+preds <- tibble(
+  growth_cluster = as.numeric(preds$x),
+  treatment = as.character(preds$group),
+  predicted = preds$predicted,
+  sd = preds$std.error,
+  conf.low = preds$conf.low,
+  conf.high = preds$conf.high
+)
+
+# convert as numeric
+data$growth_cluster2 <- as.numeric(data$growth_cluster)
+
+ggplot(NULL) +
+  geom_jitter(data = data, aes(x = growth_cluster2, y = age2_mature, colour = treatment), 
+              size = 4, height=0, width = 0.3, alpha=0.3) +
+  # prediction
+  geom_errorbar(data = preds, 
+                aes(x = growth_cluster, y = predicted, 
+                    ymin = conf.low, ymax = conf.high,
+                    colour = treatment),
+                width = 0, linewidth = 1.5, position = position_dodge(0.5)) +
+  geom_point(data = preds, aes(x = growth_cluster, y = predicted, colour = treatment),
+             size = 5, position = position_dodge(0.5)) +
+  scale_color_manual('treatment: ', values = cols) +
+  scale_x_continuous(limits = c(0.5, 3.5), breaks=seq(0,4,1)) +
+  scale_y_continuous(breaks=seq(0,1.5,0.5)) +
+  labs(x = "Growth cluster", y = "Prob. of maturation") +
+  theme(legend.position = 'top')
+
+# save to csv
+write.csv(preds, "./output/predict_prob_age2maturity_GC3.csv")
+```
+
+

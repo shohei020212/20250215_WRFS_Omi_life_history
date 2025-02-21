@@ -1,0 +1,202 @@
+---
+title: "statistical analysis for life history variation"
+author: "Shohei Noda"
+date: "2025-02-21"
+output: 
+  html_document:
+    toc: yes
+    toc_depth: 5
+    toc_float: TRUE
+    number_section: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+
+# load package
+library("dplyr")
+library(lme4)
+library(partitions)
+require(ggplot2)
+library(patchwork)
+library(RColorBrewer)
+
+# plot setting
+theme_set(
+  theme_bw() +
+    theme(title = element_text(size=20, family="sans", face="bold"),
+          axis.title = element_text(size=20, family="sans", face="bold"),
+          axis.text = element_text(size=18, family="sans"),
+          strip.text=element_text(size=20, family="sans", face="bold"),
+          strip.background = element_rect(color="black", fill="white",
+                                          linewidth=0.6, linetype="solid"),
+          panel.background = element_rect("white"),
+          legend.title = element_text(size = 15, family="sans", face="bold"),
+          legend.text = element_text(size = 15, family="sans"),
+          legend.position = 'top')
+  )
+
+```
+
+# prepare input data
+```{r}
+# read raw data
+d0 <- read.csv("./input_data/id_list.csv")
+gc <- read.csv("./output/k3_data.csv")
+
+
+# filtering
+d1 <- d0 %>% 
+  left_join(gc, by="id") %>% 
+  mutate(age_at_mature2 = case_when(age_at_mature == "0" ~ "0+",
+                                    age_at_mature == "1" ~ "1+",
+                                    age_at_mature == "2" ~ "2+",
+                                    age_at_mature == "3" ~ "3+",
+                                    age_at_mature == ">1" ~ "≥2+",
+                                    age_at_mature == ">2" ~ "≥3+",
+                                    age_at_mature == ">3" ~ "≥3+",
+                                    TRUE ~ "nd"),
+         early_mature = case_when(age_at_mature2 == "0+" ~ 1,
+                                  age_at_mature2 == "1+" ~ 1,
+                                  age_at_mature2 == "2+" ~ 0,
+                                  age_at_mature2 == "3+" ~ 0,
+                                  age_at_mature2 == "≥2+" ~ 0,
+                                  age_at_mature2 == "≥3+" ~ 0,
+                                  TRUE ~ 999),
+         gc = case_when(ocluster_rename == 1 ~ '1',
+                        ocluster_rename == 2 ~ '2',
+                        ocluster_rename == 3 ~ '3',
+                        ocluster_rename == 4 ~ '4',
+                        TRUE ~ "nd"),
+         lh = paste0(age_at_mature2,",",ocluster_rename)) %>% 
+  filter(between(cohort,2016,2021),
+         treatment == 'early' | treatment == 'late' | treatment == 'control') %>% 
+  mutate(treatment = factor(treatment, levels = c("control", "early", "late")))
+
+count(d1, cohort, treatment, age_at_mature2)
+
+```
+
+# plot life history variation in 2016-cohort
+
+data: 2016-cohort  
+
+## growth cluster
+```{r}
+# count
+d2 <- d1 %>%
+  filter(gc != 'nd',
+         cohort == 2016)
+count <- d2 %>% 
+  count(treatment) %>% 
+  mutate(sum = n) %>% 
+  dplyr::select(treatment, sum) %>% 
+  mutate(sum_label = case_when(treatment == 'control' ~ paste0('n = ', as.character(sum)),
+                               TRUE ~ as.character(sum)))
+count
+
+# make table
+lh_freq <- d2 %>%
+  count(treatment, gc) %>% 
+  left_join(count, by="treatment") %>% 
+  mutate(freq = round(n / sum * 100))
+lh_freq
+
+# plot setting
+color_list = brewer.pal(4, "RdYlBu") # color list
+color_list = c('1'= color_list[1],
+               '2'= color_list[2],
+               '3'=color_list[4])
+
+ggplot(lh_freq, aes(x = treatment, y = n, fill = gc)) + 
+  geom_bar(stat = "identity", position = "fill", color = 'black', width = 0.8) +
+  ylab("Proportion") +
+  xlab("Treatment") +
+  scale_fill_manual('growth cluster: ', values = color_list) +
+  scale_y_continuous(breaks=seq(0,1.5,0.5)) +
+  geom_text(data = lh_freq, aes(x = treatment, y = 1.1, label = sum_label), size = 6)
+
+```
+
+## age at maturity
+```{r}
+# count
+d2 <- d1 %>%
+  filter(age_at_mature2 != 'nd',
+         cohort == 2016)
+count <- d2 %>% 
+  count(treatment) %>% 
+  mutate(sum = n) %>% 
+  dplyr::select(treatment, sum) %>% 
+  mutate(sum_label = case_when(treatment == 'control' ~ paste0('n = ', as.character(sum)),
+                               TRUE ~ as.character(sum)))
+count
+
+# make table
+lh_freq <- d2 %>%
+  count(treatment, age_at_mature2) %>% 
+  left_join(count, by="treatment") %>% 
+  mutate(age_at_mature2 = factor(age_at_mature2, levels = c("0+", "1+", "2+", "3+", "≥1+", "≥2+", "≥3+")),
+         freq = round(n / sum * 100))
+lh_freq
+
+# plot setting
+color_list = brewer.pal(4, "RdYlBu") # color list
+color_list = c('0+'= color_list[1],
+               '1+'= color_list[2],
+               '≥2+'=color_list[4])
+
+ggplot(lh_freq, aes(x = treatment, y = n, fill = age_at_mature2)) + 
+  geom_bar(stat = "identity", position = "fill", color = 'black', width = 0.8) +
+  ylab("Proportion") +
+  xlab("Treatment") +
+  scale_fill_manual('age at maturity: ', values = color_list) +
+  scale_y_continuous(breaks=seq(0,1.5,0.5)) +
+  geom_text(data = lh_freq, aes(x = treatment, y = 1.1, label = sum_label), size = 6)
+
+```
+
+# statistical_analysis
+## GLM: n ~ treatment * early_mature
+```{r}
+# count
+d2 <- d1 %>%
+  filter(early_mature != 999,
+         cohort == 2016)
+lh_freq <- d2 %>% 
+  count(treatment, early_mature) %>% 
+  mutate(treatment = as.factor(treatment),
+         treatment = factor(treatment, levels = c("control", "early", "late")),
+         early_mature = as.numeric(early_mature))
+
+# model
+result <- glm(n ~ treatment*early_mature,
+                  family = poisson(link = "log"),
+                  data = lh_freq)
+summary(result)
+
+```
+
+## GLM: n ~ treatment * growth cluster
+```{r}
+# count
+d2 <- d1 %>%
+  filter(gc != "nd",
+         cohort == 2016)
+lh_freq <- d2 %>% 
+  count(treatment, gc) %>% 
+  mutate(treatment = as.factor(treatment),
+         treatment = factor(treatment, levels = c("control", "early", "late")),
+         early_mature = as.factor(gc))
+
+# model
+result <- glm(n ~ treatment*gc,
+                  family = poisson(link = "log"),
+                  data = lh_freq)
+summary(result)
+
+```
+
